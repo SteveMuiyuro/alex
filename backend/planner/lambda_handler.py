@@ -6,11 +6,13 @@ import os
 import json
 import asyncio
 import logging
+import base64
 from typing import Dict, Any
 
 from agents import Agent, Runner, trace
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from litellm.exceptions import RateLimitError
+from fastapi import FastAPI, HTTPException
 
 try:
     from dotenv import load_dotenv
@@ -31,6 +33,9 @@ logger.setLevel(logging.INFO)
 
 # Initialize database
 db = Database()
+
+# Cloud Run API for health and Pub/Sub push handling
+app = FastAPI(title="Alex Planner Service", version="1.0.0")
 
 @retry(
     retry=retry_if_exception_type(RateLimitError),
@@ -151,8 +156,65 @@ def lambda_handler(event, context):
                 })
             }
 
+
+def _decode_pubsub_push(envelope: Dict[str, Any]) -> Dict[str, Any]:
+    """Decode a Pub/Sub push envelope payload into JSON message dict."""
+    message = envelope.get("message", {})
+    data = message.get("data")
+    if not data:
+        raise ValueError("Pub/Sub push message missing data")
+
+    decoded_bytes = base64.b64decode(data)
+    decoded = decoded_bytes.decode("utf-8")
+    parsed = json.loads(decoded)
+    if not isinstance(parsed, dict):
+        raise ValueError("Pub/Sub message payload must be a JSON object")
+    return parsed
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+
+@app.post("/pubsub/push")
+async def pubsub_push_handler(envelope: Dict[str, Any]):
+    """
+    Handle Pub/Sub push messages from alex-planner-sub.
+    Expects standard Pub/Sub push envelope with base64-encoded JSON payload.
+    """
+    try:
+        payload = _decode_pubsub_push(envelope)
+        result = lambda_handler(payload, None)
+        if result.get("statusCode", 500) >= 400:
+            raise HTTPException(status_code=500, detail=result.get("body", "Planner failed"))
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Planner push handler failed: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/run")
+async def run_handler(payload: Dict[str, Any]):
+    """Direct HTTP trigger for planner; useful for smoke tests."""
+    result = lambda_handler(payload, None)
+    status_code = result.get("statusCode", 500)
+    body = result.get("body")
+    parsed_body = json.loads(body) if isinstance(body, str) else body
+    if status_code >= 400:
+        raise HTTPException(status_code=status_code, detail=parsed_body)
+    return parsed_body
+
 # For local testing
 if __name__ == "__main__":
+    if os.getenv("RUN_PLANNER_HTTP", "false").lower() == "true":
+        import uvicorn
+
+        uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+        raise SystemExit(0)
+
     # Define a test user
     test_user_id = "test_user_planner_local"
 
