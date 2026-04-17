@@ -1,195 +1,111 @@
-# Alex Architecture Overview (S3 Vectors Version)
+# Alex Architecture Overview (GCP Version)
 
 ## System Architecture
 
-The Alex platform uses a modern serverless architecture on AWS, combining AI services with cost-effective infrastructure:
+Alex now runs as a serverless architecture on **Google Cloud Platform** with Cloud Run, Pub/Sub, Cloud SQL, Vertex AI, and Cloud Storage.
 
 ```mermaid
 graph TB
-    %% API Gateway
-    APIGW[fa:fa-shield-alt API Gateway<br/>REST API<br/>API Key Auth]
-    
+    %% API Layer
+    API[fa:fa-globe Cloud Run API<br/>alex-api<br/>FastAPI + Clerk JWT]
+
     %% Backend Services
-    Lambda[fa:fa-bolt Lambda<br/>alex-ingest<br/>Document Processing]
-    AppRunner[fa:fa-server App Runner<br/>alex-researcher<br/>AI Agent Service]
-    
-    %% Scheduler Components
-    EventBridge[fa:fa-clock EventBridge<br/>Scheduler<br/>Every 2 Hours]
-    SchedulerLambda[fa:fa-bolt Lambda<br/>alex-scheduler<br/>Trigger Research]
-    
+    Ingest[fa:fa-bolt Cloud Run<br/>alex-ingest<br/>Document Processing]
+    Researcher[fa:fa-server Cloud Run<br/>alex-researcher<br/>Research Agent]
+
+    %% Scheduler
+    Scheduler[fa:fa-clock Cloud Scheduler<br/>Every 2 Hours]
+
     %% AI Services
-    SageMaker[fa:fa-brain SageMaker<br/>Embedding Model<br/>all-MiniLM-L6-v2]
-    Bedrock[fa:fa-robot AWS Bedrock<br/>OSS 120B Model<br/>us-west-2]
-    
-    %% Data Storage
-    S3Vectors[fa:fa-database S3 Vectors<br/>Vector Storage<br/>90% Cost Reduction!]
-    ECR[fa:fa-archive ECR<br/>Docker Registry<br/>Researcher Images]
-    
-    %% Connections
-    AppRunner -->|Store Research| APIGW
-    AppRunner -->|Generate| Bedrock
-    APIGW -->|Invoke| Lambda
-    
-    EventBridge -->|Every 2hrs| SchedulerLambda
-    SchedulerLambda -->|Call /research/auto| AppRunner
-    
-    Lambda -->|Get Embeddings| SageMaker
-    Lambda -->|Store Vectors| S3Vectors
-    
-    AppRunner -.->|Pull Image| ECR
-    
-    %% Styling
-    classDef aws fill:#FF9900,stroke:#232F3E,stroke-width:2px,color:#fff
-    classDef ai fill:#10B981,stroke:#047857,stroke-width:2px,color:#fff
-    classDef storage fill:#3B82F6,stroke:#1E40AF,stroke-width:2px,color:#fff
-    classDef highlight fill:#90EE90,stroke:#228B22,stroke-width:3px,color:#000
-    classDef scheduler fill:#9333EA,stroke:#6B21A8,stroke-width:2px,color:#fff
-    
-    class APIGW,Lambda,AppRunner,SageMaker,ECR,SchedulerLambda aws
-    class Bedrock ai
-    class S3Vectors storage
-    class S3Vectors highlight
-    class EventBridge scheduler
+    Vertex[fa:fa-robot Vertex AI<br/>Gemini + Embeddings]
+
+    %% Data and Messaging
+    PubSub[fa:fa-exchange-alt Pub/Sub<br/>alex-analysis-jobs]
+    SQL[(fa:fa-database Cloud SQL<br/>PostgreSQL)]
+    GCS[(fa:fa-folder-open Cloud Storage<br/>Docs + Frontend Assets)]
+    Monitor[fa:fa-chart-line Cloud Monitoring]
+
+    %% Flow
+    User[User] -->|HTTPS| API
+    API -->|CRUD| SQL
+    API -->|Queue job| PubSub
+
+    PubSub -->|Consume| Planner[fa:fa-cogs Cloud Run<br/>alex-planner]
+    Planner -->|Invoke peer agents| AgentPool[Tagger / Reporter / Charter / Retirement<br/>Cloud Run services]
+
+    AgentPool -->|Read/Write| SQL
+    Planner -->|Read/Write| SQL
+
+    Researcher -->|Generate insights| Vertex
+    Researcher -->|Store docs| GCS
+    Researcher -->|Store research metadata| SQL
+
+    Ingest -->|Embeddings / vector prep| Vertex
+    Ingest -->|Persist docs| GCS
+
+    Scheduler -->|Trigger /research/auto| Researcher
+
+    API --> Monitor
+    Planner --> Monitor
+    AgentPool --> Monitor
 ```
 
-## Component Details
+## Core Components
 
-### 1. **S3 Vectors** (NEW! - 90% Cost Reduction)
-- **Purpose**: Native vector storage in S3
-- **Features**: 
-  - Sub-second similarity search
-  - Automatic optimization
-  - No minimum charges
-  - Strongly consistent writes
-- **Cost**: ~$30/month (vs ~$300/month for OpenSearch)
-- **Scale**: Millions of vectors per index
+### 1) Cloud Run Services
+- `alex-api` (FastAPI backend for frontend)
+- `alex-ingest` (document ingestion)
+- `alex-researcher` (autonomous research)
+- `alex-planner`, `alex-tagger`, `alex-reporter`, `alex-charter`, `alex-retirement` (agent orchestra)
 
-### 2. **API Gateway**
-- **Type**: REST API
-- **Auth**: API Key authentication
-- **Endpoints**: `/ingest` (POST)
-- **Purpose**: Secure access to Lambda functions
+### 2) Cloud SQL (PostgreSQL)
+- System of record for users, portfolios, jobs, reports, and chart/projection artifacts.
 
-### 3. **Lambda Functions**
-- **alex-ingest**: Processes documents and stores embeddings
-  - Runtime: Python 3.12
-  - Memory: 512MB
-  - Timeout: 30 seconds
-- **alex-scheduler**: Triggers automated research
-  - Runtime: Python 3.11
-  - Memory: 128MB
-  - Timeout: 150 seconds
+### 3) Pub/Sub
+- Asynchronous job queue for analysis requests.
+- API publishes; planner subscribes and orchestrates downstream agent calls.
 
-### 4. **App Runner**
-- **Service**: alex-researcher
-- **Purpose**: Hosts the AI research agent
-- **Resources**: 1 vCPU, 2GB RAM
-- **Features**: Auto-scaling, HTTPS endpoint
+### 4) Vertex AI
+- Model inference path for agent reasoning and content generation.
+- Embeddings/vector-related processing path for ingestion/research workflows.
 
-### 5. **SageMaker Serverless**
-- **Model**: sentence-transformers/all-MiniLM-L6-v2
-- **Purpose**: Generate 384-dimensional embeddings
-- **Memory**: 3GB
-- **Concurrency**: 10 max
+### 5) Cloud Storage
+- Stores ingestion files and static frontend artifacts.
 
-### 6. **EventBridge Scheduler**
-- **Rule**: alex-research-schedule
-- **Schedule**: Every 2 hours
-- **Target**: alex-scheduler Lambda
-- **Purpose**: Automated research generation
+### 6) Cloud Scheduler
+- Optional recurring trigger for autonomous research cycles.
 
-### 7. **AWS Bedrock**
-- **Provider**: AWS Bedrock
-- **Model**: OpenAI OSS 120B (open-weight model)
-- **Region**: us-west-2 (model only available here)
-- **Purpose**: Research generation and analysis
-- **Features**: 128K context window, cross-region access
+### 7) Cloud Monitoring
+- Dashboards and service-level observability for API, agents, queue depth, and DB health.
 
 ## Data Flow
 
-1. **Manual Research Flow**:
-   ```
-   User → App Runner → Bedrock (generate) → API Gateway → Lambda → S3 Vectors
-   ```
+1. **User-triggered portfolio analysis**
+   - User → `alex-api` → Cloud SQL + Pub/Sub
+   - Planner consumes queue message, orchestrates specialist agents
+   - Agents write results to Cloud SQL
+   - Frontend fetches completed outputs from API
 
-2. **Automated Research Flow**:
-   ```
-   EventBridge (every 2hrs) → Lambda Scheduler → App Runner → Bedrock → API Gateway → Lambda → S3 Vectors
-   ```
+2. **Autonomous research cycle**
+   - Cloud Scheduler → `alex-researcher`
+   - Researcher uses Vertex AI and stores outputs (Cloud Storage/DB)
 
-3. **Direct Ingest Flow**:
-   ```
-   User → API Gateway → Lambda → SageMaker (embed) → S3 Vectors
-   ```
+3. **Ingestion flow**
+   - Ingest endpoint receives documents
+   - Ingest processes with Vertex path
+   - Outputs stored in Cloud Storage (and metadata in DB as needed)
 
-4. **Search Flow** (future):
-   ```
-   User → API Gateway → Lambda → S3 Vectors (similarity search)
-   ```
+## Deployment Model
 
-## Cost Optimization
+- Infrastructure is defined in independent Terraform directories (`terraform/2_*` through `terraform/8_*`) using the **Google provider**.
+- Each directory remains deployable independently for incremental progress.
 
-| Component | Monthly Cost | Notes |
-|-----------|-------------|-------|
-| S3 Vectors | ~$30 | 90% cheaper than OpenSearch! |
-| SageMaker Serverless | ~$5-10 | Pay per request |
-| Lambda | ~$1 | Minimal invocations |
-| App Runner | ~$5 | 1 vCPU, 2GB RAM |
-| API Gateway | ~$1 | REST API |
-| **Total** | **~$42-47** | Previously ~$250+ |
+## Working-Backend-API Gate
 
-## Security Features
+You can proceed confidently when:
 
-- **API Gateway**: API key authentication
-- **IAM Roles**: Least privilege access
-- **S3 Vectors**: Always private (no public access)
-- **App Runner**: HTTPS by default
-- **Secrets**: Environment variables for API keys
-
-## Deployment Architecture
-
-```mermaid
-graph LR
-    Dev[fa:fa-laptop Developer]
-    GH[fa:fa-code-branch GitHub Repo]
-    TF[fa:fa-cog Terraform]
-    AWS[fa:fa-cloud AWS]
-    
-    Dev -->|Push| GH
-    Dev -->|Run| TF
-    TF -->|Deploy| AWS
-    
-    subgraph AWS Infrastructure
-        S3[S3 State]
-        Resources[All Resources]
-    end
-    
-    TF -.->|State| S3
-    TF -->|Create| Resources
-```
-
-## Technology Stack
-
-- **Infrastructure**: Terraform
-- **Compute**: Lambda, App Runner
-- **AI/ML**: SageMaker, AWS Bedrock
-- **Storage**: S3 Vectors
-- **API**: API Gateway
-- **Languages**: Python 3.12
-- **Container**: Docker
-
-## Key Advantages of S3 Vectors
-
-1. **Cost**: 90% reduction vs traditional vector databases
-2. **Simplicity**: Just S3 - no complex infrastructure
-3. **Scale**: Handles millions of vectors
-4. **Performance**: Sub-second queries
-5. **Integration**: Native AWS service
-
-## Future Enhancements
-
-- Frontend application (Next.js)
-- User authentication
-- Advanced search features
-- Real-time updates
-- Analytics dashboard
+1. `alex-api` is healthy on Cloud Run.
+2. API can read/write Cloud SQL through `DATABASE_URL`.
+3. API can publish jobs to `alex-analysis-jobs`.
+4. `alex-planner` consumes jobs and updates job status/results.
+5. Clerk JWT auth works end-to-end on protected `/api/*` routes.
