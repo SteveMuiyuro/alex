@@ -57,3 +57,8 @@ _If you're looking at this in Cursor, please right click on the filename in the 
 - Deploy `terraform/7_frontend`, then build frontend with `NEXT_PUBLIC_API_URL` set to Terraform output `api_url`.
 - Upload `frontend/out` to the GCS bucket from Terraform output `frontend_bucket`.
 - Run `uv run scripts/verify_frontend_backend.py --api-url <api_url> --origin <frontend_origin>` to validate `/health` and CORS preflight.
+
+#### If your PR shows merge conflicts on GCP migration files
+
+- Run `uv run scripts/resolve_gcp_merge_conflicts.py --strategy ours` to auto-resolve the known conflict set from the GCP migration branch.
+- Then review staged changes with `git diff --staged` and commit.
