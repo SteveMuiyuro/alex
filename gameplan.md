@@ -496,7 +496,7 @@ The most common issues relate to AWS region choices! Check environment variables
 - API Gateway + Lambda backend
 - Clerk authentication
 
-**Guide 8**: Enterprise
+**Guide 8**: Enterprises
 - CloudWatch dashboard
 - Alarms and monitoring
 - LangFuse observability
