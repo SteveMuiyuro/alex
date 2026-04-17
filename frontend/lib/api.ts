@@ -3,8 +3,19 @@
  */
 import { showToast } from '../components/Toast';
 
-// API base URL - in production this will be the API Gateway URL
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+function getApiBaseUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (configured) {
+    return configured.replace(/\/$/, '');
+  }
+
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return 'http://localhost:8000';
+  }
+
+  // Production fallback: same-origin only works if a reverse proxy is configured.
+  return '';
+}
 
 // Type definitions
 export interface User {
@@ -53,7 +64,8 @@ export async function apiRequest<T = unknown>(
   token: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const apiBaseUrl = getApiBaseUrl();
+  const url = `${apiBaseUrl}${endpoint}`;
 
   const response = await fetch(url, {
     ...options,

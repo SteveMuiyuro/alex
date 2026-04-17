@@ -36,3 +36,24 @@ _If you're looking at this in Cursor, please right click on the filename in the 
 - Please submit your community_contributions, including links to your repos, in the production repo community_contributions folder
 - Regularly do a git pull to get the latest code
 - Reach out in Udemy or email (ed@edwarddonner.com) if I can help! This is a gigantic project and I am here to help you deliver it!
+
+#### Quick pre-flight checklist (before running deploy/package scripts)
+
+- Confirm Docker Desktop is running and healthy (`docker ps` should work).
+- Confirm you are using the intended AWS account and region (`aws sts get-caller-identity` and `aws configure list`).
+- In each Terraform folder, copy `terraform.tfvars.example` to `terraform.tfvars` and fill all required variables before `terraform apply`.
+- Use `uv` for Python commands in each project directory (`uv run ...`, `uv add ...`), not `pip` or raw `python`.
+
+#### GCP migration checkpoints (current architecture)
+
+- Queueing/orchestration uses **Pub/Sub + Cloud Run services** (not SQS/Lambda runtime coupling).
+- Operational database is **PostgreSQL via `DATABASE_URL`** (Cloud SQL-compatible).
+- API runtime is **FastAPI on Cloud Run** with endpoint health check at `/health`.
+- Frontend is static hosting in **GCS bucket**, calling API via `NEXT_PUBLIC_API_URL`.
+
+#### Frontend ↔ Backend connection checklist (GCP only)
+
+- Set `cors_origins` in `terraform/7_frontend/terraform.tfvars` to include both local dev origin and deployed frontend origin.
+- Deploy `terraform/7_frontend`, then build frontend with `NEXT_PUBLIC_API_URL` set to Terraform output `api_url`.
+- Upload `frontend/out` to the GCS bucket from Terraform output `frontend_bucket`.
+- Run `uv run scripts/verify_frontend_backend.py --api-url <api_url> --origin <frontend_origin>` to validate `/health` and CORS preflight.

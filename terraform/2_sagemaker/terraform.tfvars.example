@@ -1,6 +1,5 @@
-# Part 2: SageMaker Configuration
-# Copy this file to terraform.tfvars and update with your values
+project_id = "alex-prod-project"
+region     = "us-central1"
 
-# Your AWS region for SageMaker
-# Should match your DEFAULT_AWS_REGION from .env
-aws_region = "us-east-1"
+create_matching_endpoint = false
+matching_endpoint_name   = "alex-matching-endpoint"

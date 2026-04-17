@@ -1,11 +1,12 @@
 """
-Financial Planner Orchestrator Lambda Handler
+Financial Planner Orchestrator runtime handler.
 """
 
 import os
 import json
 import asyncio
 import logging
+import base64
 from typing import Dict, Any
 
 from agents import Agent, Runner, trace
@@ -83,13 +84,48 @@ async def run_orchestrator(job_id: str) -> None:
         db.jobs.update_status(job_id, 'failed', error_message=str(e))
         raise
 
+def _extract_job_id_from_event(event: Dict[str, Any]) -> str | None:
+    """Extract job_id from supported queue event formats (GCP and legacy AWS)."""
+    # AWS SQS format (legacy compatibility)
+    if "Records" in event and len(event["Records"]) > 0:
+        body = event["Records"][0].get("body")
+        if isinstance(body, str) and body.startswith("{"):
+            try:
+                payload = json.loads(body)
+                return payload.get("job_id")
+            except json.JSONDecodeError:
+                return body
+        return body
+
+    # Pub/Sub push format:
+    # {"message": {"data": "base64-encoded-json-or-string"}}
+    if "message" in event and isinstance(event["message"], dict):
+        message = event["message"]
+        data = message.get("data")
+        if data:
+            try:
+                decoded_data = base64.b64decode(data).decode("utf-8")
+                if decoded_data.startswith("{"):
+                    return json.loads(decoded_data).get("job_id")
+                return decoded_data
+            except Exception:
+                logger.warning("Planner: Failed to decode Pub/Sub message.data", exc_info=True)
+        return message.get("job_id")
+
+    # Direct invocation format (local/dev)
+    if "job_id" in event:
+        return event["job_id"]
+
+    return None
+
+
 def lambda_handler(event, context):
     """
-    Lambda handler for SQS-triggered orchestration.
+    Runtime handler for queue-triggered orchestration.
 
-    Expected event from SQS:
+    Expected event from Pub/Sub push or generic queue adapters:
     {
-        "Records": [
+        "records": [
             {
                 "body": "job_id"
             }
@@ -99,23 +135,11 @@ def lambda_handler(event, context):
     # Wrap entire handler with observability context
     with observe():
         try:
-            logger.info(f"Planner Lambda invoked with event: {json.dumps(event)[:500]}")
+            logger.info(f"Planner runtime invoked with event: {json.dumps(event)[:500]}")
 
-            # Extract job_id from SQS message
-            if 'Records' in event and len(event['Records']) > 0:
-                # SQS message
-                job_id = event['Records'][0]['body']
-                if isinstance(job_id, str) and job_id.startswith('{'):
-                    # Body might be JSON
-                    try:
-                        body = json.loads(job_id)
-                        job_id = body.get('job_id', job_id)
-                    except json.JSONDecodeError:
-                        pass
-            elif 'job_id' in event:
-                # Direct invocation
-                job_id = event['job_id']
-            else:
+            # Extract job_id from supported queue formats
+            job_id = _extract_job_id_from_event(event)
+            if not job_id:
                 logger.error("No job_id found in event")
                 return {
                     'statusCode': 400,
@@ -144,6 +168,16 @@ def lambda_handler(event, context):
                     'error': str(e)
                 })
             }
+
+
+def cloud_function_entry(event, context):
+    """
+    Google Cloud Functions / Eventarc entrypoint wrapper.
+
+    This accepts the standard Pub/Sub event payload and routes it through the
+    shared queue handler so local and cloud execution stay consistent.
+    """
+    return lambda_handler(event, context)
 
 # For local testing
 if __name__ == "__main__":

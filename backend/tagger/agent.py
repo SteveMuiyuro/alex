@@ -24,8 +24,7 @@ load_dotenv(override=True)
 logger = logging.getLogger(__name__)
 
 # Get configuration
-BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0")
-BEDROCK_REGION = os.getenv("BEDROCK_REGION", "us-west-2")
+VERTEX_MODEL = os.getenv("VERTEX_MODEL", "gemini-2.5-flash")
 
 
 class AllocationBreakdown(BaseModel):
@@ -172,13 +171,7 @@ async def classify_instrument(
     """
     try:
         # Initialize the model
-        model_id = BEDROCK_MODEL_ID
-
-        # Set region for LiteLLM Bedrock calls
-        bedrock_region = os.getenv("BEDROCK_REGION", "us-west-2")
-        os.environ["AWS_REGION_NAME"] = bedrock_region
-
-        model = LitellmModel(model=f"bedrock/{model_id}")
+        model = LitellmModel(model=f"vertex_ai/{VERTEX_MODEL}")
 
         # Create the classification task
         task = CLASSIFICATION_PROMPT.format(

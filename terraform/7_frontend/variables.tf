@@ -1,17 +1,55 @@
-variable "aws_region" {
-  description = "AWS region for deployment"
+variable "project_id" {
+  description = "GCP project ID"
   type        = string
-  default     = "us-east-1"
 }
 
-# Clerk validation happens in Lambda, not at API Gateway level
+variable "region" {
+  description = "GCP region"
+  type        = string
+  default     = "us-central1"
+}
+
+variable "frontend_bucket_name" {
+  description = "Static frontend bucket name"
+  type        = string
+}
+
+variable "api_image" {
+  description = "Cloud Run API container image"
+  type        = string
+  default     = "us-docker.pkg.dev/cloudrun/container/hello"
+}
+
+variable "database_url" {
+  description = "PostgreSQL SQLAlchemy URL"
+  type        = string
+  sensitive   = true
+}
+
+variable "pubsub_topic" {
+  description = "Pub/Sub topic for analysis jobs"
+  type        = string
+}
+
 variable "clerk_jwks_url" {
-  description = "Clerk JWKS URL for JWT validation in Lambda"
+  description = "Clerk JWKS URL"
   type        = string
 }
 
-variable "clerk_issuer" {
-  description = "Clerk issuer URL (kept for Lambda environment)"
+variable "cors_origins" {
+  description = "Allowed CORS origins for API (exact origins, no trailing slash)"
+  type        = list(string)
+  default     = ["http://localhost:3000"]
+}
+
+variable "vertex_model" {
+  description = "Vertex model used by API/orchestrator"
   type        = string
-  default     = ""  # Not actually used but kept for backwards compatibility
+  default     = "gemini-2.5-flash"
+}
+
+variable "vertex_region" {
+  description = "Vertex region"
+  type        = string
+  default     = "us-east4"
 }
