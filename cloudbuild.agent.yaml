@@ -1,0 +1,11 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - backend/${_SERVICE}/Dockerfile
+      - -t
+      - us-central1-docker.pkg.dev/alex-prod-project/alex/${_SERVICE}:latest
+      - .
+images:
+  - us-central1-docker.pkg.dev/alex-prod-project/alex/${_SERVICE}:latest

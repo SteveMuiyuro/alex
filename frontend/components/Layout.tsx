@@ -3,6 +3,13 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import { ReactNode } from "react";
 import PageTransition from "./PageTransition";
+import {
+  ACCOUNTS_ROUTE,
+  ADVISOR_TEAM_ROUTE,
+  ANALYSIS_ROUTE,
+  CLERK_HOME_URL,
+  DASHBOARD_ROUTE,
+} from "@/lib/routes";
 
 interface LayoutProps {
   children: ReactNode;
@@ -30,7 +37,7 @@ export default function Layout({ children }: LayoutProps) {
             <div className="flex justify-between items-center h-16">
               {/* Logo and Brand */}
               <div className="flex items-center gap-8">
-                <Link href="/dashboard" className="flex items-center">
+                <Link href={DASHBOARD_ROUTE} className="flex items-center">
                   <h1 className="text-xl font-bold text-dark">
                     Alex <span className="text-primary">AI Financial Advisor</span>
                   </h1>
@@ -39,7 +46,7 @@ export default function Layout({ children }: LayoutProps) {
                 {/* Navigation Links */}
                 <div className="hidden md:flex items-center gap-6">
                   <Link
-                    href="/dashboard"
+                    href={DASHBOARD_ROUTE}
                     className={`text-sm font-medium transition-colors ${
                       isActive("/dashboard")
                         ? "text-primary"
@@ -49,7 +56,7 @@ export default function Layout({ children }: LayoutProps) {
                     Dashboard
                   </Link>
                   <Link
-                    href="/accounts"
+                    href={ACCOUNTS_ROUTE}
                     className={`text-sm font-medium transition-colors ${
                       isActive("/accounts")
                         ? "text-primary"
@@ -59,7 +66,7 @@ export default function Layout({ children }: LayoutProps) {
                     Accounts
                   </Link>
                   <Link
-                    href="/advisor-team"
+                    href={ADVISOR_TEAM_ROUTE}
                     className={`text-sm font-medium transition-colors ${
                       isActive("/advisor-team")
                         ? "text-primary"
@@ -69,7 +76,7 @@ export default function Layout({ children }: LayoutProps) {
                     Advisor Team
                   </Link>
                   <Link
-                    href="/analysis"
+                    href={ANALYSIS_ROUTE}
                     className={`text-sm font-medium transition-colors ${
                       isActive("/analysis")
                         ? "text-primary"
@@ -86,14 +93,14 @@ export default function Layout({ children }: LayoutProps) {
                 <span className="hidden sm:inline text-sm text-gray-600">
                   {user?.firstName || user?.emailAddresses[0]?.emailAddress}
                 </span>
-                <UserButton afterSignOutUrl="/" />
+                <UserButton afterSignOutUrl={CLERK_HOME_URL} />
               </div>
             </div>
 
             {/* Mobile Navigation */}
             <div className="md:hidden flex items-center gap-4 pb-3">
               <Link
-                href="/dashboard"
+                href={DASHBOARD_ROUTE}
                 className={`text-sm font-medium transition-colors ${
                   isActive("/dashboard")
                     ? "text-primary"
@@ -103,7 +110,7 @@ export default function Layout({ children }: LayoutProps) {
                 Dashboard
               </Link>
               <Link
-                href="/accounts"
+                href={ACCOUNTS_ROUTE}
                 className={`text-sm font-medium transition-colors ${
                   isActive("/accounts")
                     ? "text-primary"
@@ -113,7 +120,7 @@ export default function Layout({ children }: LayoutProps) {
                 Accounts
               </Link>
               <Link
-                href="/advisor-team"
+                href={ADVISOR_TEAM_ROUTE}
                 className={`text-sm font-medium transition-colors ${
                   isActive("/advisor-team")
                     ? "text-primary"
@@ -123,7 +130,7 @@ export default function Layout({ children }: LayoutProps) {
                 Advisor Team
               </Link>
               <Link
-                href="/analysis"
+                href={ANALYSIS_ROUTE}
                 className={`text-sm font-medium transition-colors ${
                   isActive("/analysis")
                     ? "text-primary"

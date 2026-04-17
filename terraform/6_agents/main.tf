@@ -23,6 +23,8 @@ resource "google_project_service" "required" {
     "pubsub.googleapis.com",
     "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
+    "secretmanager.googleapis.com",
+    "sqladmin.googleapis.com",
   ])
   project = var.project_id
   service = each.value
@@ -61,6 +63,7 @@ resource "google_project_iam_member" "agents_roles" {
     "roles/aiplatform.user",
     "roles/logging.logWriter",
     "roles/monitoring.metricWriter",
+    "roles/secretmanager.secretAccessor",
   ])
 
   project = var.project_id
@@ -79,6 +82,14 @@ resource "google_cloud_run_v2_service" "workers" {
 
   template {
     service_account = google_service_account.agents.email
+
+    volumes {
+      name = "cloudsql"
+
+      cloud_sql_instance {
+        instances = [var.cloudsql_connection_name]
+      }
+    }
 
     containers {
       image = lookup(var.agent_images, each.value, var.default_agent_image)
@@ -104,8 +115,34 @@ resource "google_cloud_run_v2_service" "workers" {
         value = google_pubsub_topic.analysis_jobs.name
       }
       env {
-        name  = "DATABASE_URL"
-        value = var.database_url
+        name  = "DB_USER"
+        value = var.db_user
+      }
+      env {
+        name  = "DB_PASSWORD"
+        value = var.db_password
+      }
+      env {
+        name  = "DB_NAME"
+        value = var.db_name
+      }
+      env {
+        name  = "CLOUDSQL_CONNECTION_NAME"
+        value = var.cloudsql_connection_name
+      }
+      env {
+        name = "OPENAI_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = var.openai_api_secret_name
+            version = "latest"
+          }
+        }
+      }
+
+      volume_mounts {
+        name       = "cloudsql"
+        mount_path = "/cloudsql"
       }
     }
 
@@ -127,6 +164,14 @@ resource "google_cloud_run_v2_service" "planner" {
 
   template {
     service_account = google_service_account.agents.email
+
+    volumes {
+      name = "cloudsql"
+
+      cloud_sql_instance {
+        instances = [var.cloudsql_connection_name]
+      }
+    }
 
     containers {
       image = lookup(var.agent_images, "planner", var.default_agent_image)
@@ -152,8 +197,29 @@ resource "google_cloud_run_v2_service" "planner" {
         value = google_pubsub_topic.analysis_jobs.name
       }
       env {
-        name  = "DATABASE_URL"
-        value = var.database_url
+        name  = "DB_USER"
+        value = var.db_user
+      }
+      env {
+        name  = "DB_PASSWORD"
+        value = var.db_password
+      }
+      env {
+        name  = "DB_NAME"
+        value = var.db_name
+      }
+      env {
+        name  = "CLOUDSQL_CONNECTION_NAME"
+        value = var.cloudsql_connection_name
+      }
+      env {
+        name = "OPENAI_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = var.openai_api_secret_name
+            version = "latest"
+          }
+        }
       }
       env {
         name  = "TAGGER_ENDPOINT"
@@ -170,6 +236,11 @@ resource "google_cloud_run_v2_service" "planner" {
       env {
         name  = "RETIREMENT_ENDPOINT"
         value = "${google_cloud_run_v2_service.workers["retirement"].uri}/retirement"
+      }
+
+      volume_mounts {
+        name       = "cloudsql"
+        mount_path = "/cloudsql"
       }
     }
 

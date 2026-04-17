@@ -287,9 +287,20 @@ class DataAPIClient:
         host = os.environ.get("DB_HOST")
         port = os.environ.get("DB_PORT", "5432")
         dbname = database or os.environ.get("DB_NAME")
+        cloudsql_connection_name = os.environ.get("CLOUDSQL_CONNECTION_NAME")
+        socket_dir = os.environ.get("DB_SOCKET_DIR", "/cloudsql")
+
+        if not host and cloudsql_connection_name:
+            host = f"{socket_dir}/{cloudsql_connection_name}"
 
         if not user or password is None or not host or not dbname:
             return None
+
+        if host.startswith("/"):
+            return (
+                f"postgresql+psycopg2://{user}:{quote_plus(password)}@/{dbname}"
+                f"?host={quote_plus(host)}"
+            )
 
         return f"postgresql+psycopg2://{user}:{quote_plus(password)}@{host}:{port}/{dbname}"
 

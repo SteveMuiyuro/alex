@@ -8,7 +8,7 @@ import asyncio
 import logging
 from typing import Dict, Any
 
-from agents import Agent, Runner, trace
+from agents import Agent, Runner
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from litellm.exceptions import RateLimitError
 
@@ -24,6 +24,7 @@ from src import Database
 from templates import CHARTER_INSTRUCTIONS
 from agent import create_agent
 from observability import observe
+from src.openai_tracing import traced_agent_execution
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -40,8 +41,12 @@ async def run_charter_agent(job_id: str, portfolio_data: Dict[str, Any], db=None
     # Create agent without tools - will output JSON
     model, task = create_agent(job_id, portfolio_data, db)
     
-    # Run agent - no tools, no context
-    with trace("Charter Agent"):
+    trace_input = {
+        "job_id": job_id,
+        "portfolio_data": portfolio_data,
+        "task": task,
+    }
+    with traced_agent_execution("charter", job_id, trace_input) as trace_recorder:
         agent = Agent(
             name="Chart Maker",
             instructions=CHARTER_INSTRUCTIONS,
@@ -117,12 +122,14 @@ async def run_charter_agent(job_id: str, portfolio_data: Dict[str, Any], db=None
                 logger.error(f"Charter: No JSON structure found in output")
                 logger.error(f"Charter: Output preview: {output[:500]}...")
         
-        return {
+        response_payload = {
             'success': charts_saved,
             'message': f'Generated {len(charts_data) if charts_data else 0} charts' if charts_saved else 'Failed to generate charts',
             'charts_generated': len(charts_data) if charts_data else 0,
             'chart_keys': list(charts_data.keys()) if charts_data else []
         }
+        trace_recorder.record_output(response_payload)
+        return response_payload
 
 def lambda_handler(event, context):
     """

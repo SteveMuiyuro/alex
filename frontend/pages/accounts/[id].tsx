@@ -4,6 +4,7 @@ import { useRouter } from "next/router";
 import Layout from "../../components/Layout";
 import ConfirmModal from "../../components/ConfirmModal";
 import { API_URL } from "../../lib/config";
+import { ACCOUNTS_ROUTE } from "../../lib/routes";
 
 interface Instrument {
   symbol: string;
@@ -77,7 +78,7 @@ export default function AccountDetail() {
           });
         } else {
           setMessage({ type: 'error', text: 'Account not found' });
-          setTimeout(() => router.push('/accounts'), 2000);
+          setTimeout(() => router.push(ACCOUNTS_ROUTE), 2000);
           return;
         }
       }
@@ -324,7 +325,7 @@ export default function AccountDetail() {
         {/* Breadcrumb */}
         <div className="mb-4">
           <button
-            onClick={() => router.push('/accounts')}
+            onClick={() => router.push(ACCOUNTS_ROUTE)}
             className="text-primary hover:text-blue-600 flex items-center gap-1"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

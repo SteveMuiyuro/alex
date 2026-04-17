@@ -1,12 +1,15 @@
 import type { NextConfig } from "next";
+import { getSiteUrl } from "./lib/site-url";
+
+const siteUrl = getSiteUrl();
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  output: 'export',
+  output: "export",
+  assetPrefix: process.env.NODE_ENV === "production" && siteUrl ? siteUrl : undefined,
   images: {
-    unoptimized: true
+    unoptimized: true,
   },
-  // Disable automatic trailing slash redirect for API routes
   trailingSlash: false,
 };
 

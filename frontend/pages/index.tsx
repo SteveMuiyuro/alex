@@ -1,8 +1,23 @@
-import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import { SignInButton, SignUpButton, SignedIn, UserButton, useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import Head from "next/head";
+import { useEffect, useState } from "react";
+import {
+  CLERK_DASHBOARD_URL,
+  CLERK_HOME_URL,
+  DASHBOARD_ROUTE,
+} from "@/lib/routes";
 
 export default function Home() {
+  const { isSignedIn } = useAuth();
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  const showSignedOutCtas = !isMounted || !isSignedIn;
+
   return (
     <>
       <Head>
@@ -16,26 +31,36 @@ export default function Home() {
             Alex <span className="text-primary">AI Financial Advisor</span>
           </div>
           <div className="flex gap-4">
-            <SignedOut>
-              <SignInButton mode="modal">
+            {showSignedOutCtas ? (
+              <>
+              <SignInButton
+                mode="modal"
+                fallbackRedirectUrl={CLERK_DASHBOARD_URL}
+                forceRedirectUrl={CLERK_DASHBOARD_URL}
+              >
                 <button className="px-6 py-2 text-primary border border-primary rounded-lg hover:bg-primary hover:text-white transition-colors">
                   Sign In
                 </button>
               </SignInButton>
-              <SignUpButton mode="modal">
+              <SignUpButton
+                mode="modal"
+                fallbackRedirectUrl={CLERK_DASHBOARD_URL}
+                forceRedirectUrl={CLERK_DASHBOARD_URL}
+              >
                 <button className="px-6 py-2 bg-primary text-white rounded-lg hover:bg-blue-600 transition-colors">
                   Get Started
                 </button>
               </SignUpButton>
-            </SignedOut>
+              </>
+            ) : null}
             <SignedIn>
               <div className="flex items-center gap-4">
-                <Link href="/dashboard">
+                <Link href={DASHBOARD_ROUTE}>
                   <button className="px-6 py-2 bg-ai-accent text-white rounded-lg hover:bg-purple-700 transition-colors">
                     Go to Dashboard
                   </button>
                 </Link>
-                <UserButton afterSignOutUrl="/" />
+                <UserButton afterSignOutUrl={CLERK_HOME_URL} />
               </div>
             </SignedIn>
           </div>
@@ -53,15 +78,19 @@ export default function Home() {
             plan your retirement, and optimize your investments.
           </p>
           <div className="flex gap-6 justify-center">
-            <SignedOut>
-              <SignUpButton mode="modal">
+            {showSignedOutCtas ? (
+              <SignUpButton
+                mode="modal"
+                fallbackRedirectUrl={CLERK_DASHBOARD_URL}
+                forceRedirectUrl={CLERK_DASHBOARD_URL}
+              >
                 <button className="px-8 py-4 bg-ai-accent text-white text-lg rounded-lg hover:bg-purple-700 transition-colors shadow-lg">
                   Start Your Analysis
                 </button>
               </SignUpButton>
-            </SignedOut>
+            ) : null}
             <SignedIn>
-              <Link href="/dashboard">
+              <Link href={DASHBOARD_ROUTE}>
                 <button className="px-8 py-4 bg-ai-accent text-white text-lg rounded-lg hover:bg-purple-700 transition-colors shadow-lg">
                   Open Dashboard
                 </button>
@@ -140,7 +169,11 @@ export default function Home() {
           <p className="text-xl mb-8 opacity-90">
             Join thousands of investors using AI to optimize their portfolios
           </p>
-          <SignUpButton mode="modal">
+          <SignUpButton
+            mode="modal"
+            fallbackRedirectUrl={CLERK_DASHBOARD_URL}
+            forceRedirectUrl={CLERK_DASHBOARD_URL}
+          >
             <button className="px-8 py-4 bg-accent text-dark font-semibold text-lg rounded-lg hover:bg-yellow-500 transition-colors shadow-lg">
               Get Started Free
             </button>

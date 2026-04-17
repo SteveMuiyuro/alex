@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import Head from 'next/head';
+import { DASHBOARD_ROUTE } from '@/lib/routes';
 
 export default function Custom404() {
   return (
@@ -14,7 +15,7 @@ export default function Custom404() {
           <p className="text-gray-600 mb-8">
             The page you&apos;re looking for doesn&apos;t exist or has been moved.
           </p>
-          <Link href="/dashboard">
+          <Link href={DASHBOARD_ROUTE}>
             <button className="bg-primary hover:bg-blue-600 text-white px-6 py-3 rounded-lg transition-colors">
               Return to Dashboard
             </button>

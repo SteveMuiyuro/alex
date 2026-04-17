@@ -4,7 +4,11 @@ region     = "us-central1"
 vertex_region = "us-east4"
 vertex_model  = "gemini-2.5-flash"
 
-database_url = "postgresql+psycopg2://alex_app:CHANGE_ME@<CLOUD_SQL_IP>:5432/alex"
+db_user                  = "postgres"
+db_password              = "CHANGE_ME"
+db_name                  = "alex"
+cloudsql_connection_name = "alex-prod-project:us-central1:alex-db"
+openai_api_secret_name   = "openai-api-key"
 
 # Optional per-agent images
 agent_images = {

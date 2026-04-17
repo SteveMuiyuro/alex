@@ -21,10 +21,30 @@ variable "vertex_model" {
   default     = "gemini-2.5-flash"
 }
 
-variable "database_url" {
-  description = "PostgreSQL SQLAlchemy connection URL"
+variable "db_user" {
+  description = "PostgreSQL username"
+  type        = string
+}
+
+variable "db_password" {
+  description = "PostgreSQL password"
   type        = string
   sensitive   = true
+}
+
+variable "db_name" {
+  description = "PostgreSQL database name"
+  type        = string
+}
+
+variable "cloudsql_connection_name" {
+  description = "Cloud SQL instance connection name"
+  type        = string
+}
+
+variable "openai_api_secret_name" {
+  description = "Secret Manager secret name for the OpenAI API key"
+  type        = string
 }
 
 variable "default_agent_image" {

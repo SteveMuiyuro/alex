@@ -2,7 +2,6 @@
 __pycache__/
 *.py[codz]
 *$py.class
-*.json
 # C extensions
 *.so
 
@@ -144,6 +143,10 @@ celerybeat.pid
 # Terraform variables (contain secrets)
 *.tfvars
 !*.tfvars.example
+.terraform/
+terraform.tfstate.d/
+*.tfstate
+*.tfstate.backup
 .venv
 env/
 venv/
@@ -217,10 +220,16 @@ __marimo__/
 
 .DS_Store
 
-.terraform/
-terraform.tfstate.d/
-*.tfstate
-*.tfstate.backup
+# Frontend build artifacts and local config
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
+frontend/.env.local
+
+# Local service account and credential files
+backend/researcher/*-sa.json
+*service-account*.json
 
 # Lambda deployment packages
 lambda_function.zip

@@ -5,6 +5,7 @@ import Layout from '../components/Layout';
 import { API_URL } from '../lib/config';
 import { emitAnalysisCompleted, emitAnalysisFailed, emitAnalysisStarted } from '../lib/events';
 import Head from 'next/head';
+import { analysisRoute } from '../lib/routes';
 
 interface Agent {
   icon: string;
@@ -114,7 +115,7 @@ export default function AdvisorTeam() {
             fetchJobs();
 
             setTimeout(() => {
-              router.push(`/analysis?job_id=${jobId}`);
+              router.push(analysisRoute(jobId));
             }, 1500);
           } else if (job.status === 'failed') {
             setProgress({
@@ -398,7 +399,7 @@ export default function AdvisorTeam() {
                         </span>
                         {job.status === 'completed' && (
                           <button
-                            onClick={() => router.push(`/analysis?job_id=${job.id}`)}
+                            onClick={() => router.push(analysisRoute(job.id))}
                             className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-blue-600 text-sm font-semibold"
                           >
                             View

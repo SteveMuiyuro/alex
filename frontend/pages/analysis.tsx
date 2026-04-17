@@ -11,6 +11,7 @@ import {
 import Layout from '../components/Layout';
 import { API_URL } from '../lib/config';
 import Head from 'next/head';
+import { ADVISOR_TEAM_ROUTE, analysisRoute } from '../lib/routes';
 
 interface Job {
   id: string;
@@ -110,7 +111,7 @@ export default function Analysis() {
             // Load the full job details
             await loadJob(latestCompletedJob.id);
             // Update the URL to include the job_id without causing a page reload
-            router.replace(`/analysis?job_id=${latestCompletedJob.id}`, undefined, { shallow: true });
+            router.replace(analysisRoute(latestCompletedJob.id), undefined, { shallow: true });
           } else {
             setLoading(false);
           }
@@ -177,7 +178,7 @@ export default function Analysis() {
               </p>
               {!fetchingLatest && (
                 <button
-                  onClick={() => router.push('/advisor-team')}
+                  onClick={() => router.push(ADVISOR_TEAM_ROUTE)}
                   className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-blue-600 font-semibold"
                 >
                   Start New Analysis
@@ -230,7 +231,7 @@ export default function Analysis() {
                 </div>
               )}
               <button
-                onClick={() => router.push('/advisor-team')}
+                onClick={() => router.push(ADVISOR_TEAM_ROUTE)}
                 className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-blue-600 font-semibold"
               >
                 Try Another Analysis
@@ -499,7 +500,7 @@ export default function Analysis() {
                 </p>
               </div>
               <button
-                onClick={() => router.push('/advisor-team')}
+                onClick={() => router.push(ADVISOR_TEAM_ROUTE)}
                 className="px-6 py-3 bg-ai-accent text-white rounded-lg hover:bg-purple-700 font-semibold"
               >
                 New Analysis

@@ -1,5 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import Link from 'next/link';
+import { DASHBOARD_ROUTE } from '@/lib/routes';
 
 interface Props {
   children: ReactNode;
@@ -26,7 +26,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   private handleReset = () => {
     this.setState({ hasError: false, error: null });
-    window.location.href = '/dashboard';
+    window.location.href = DASHBOARD_ROUTE;
   };
 
   public render() {

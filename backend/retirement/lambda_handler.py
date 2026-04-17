@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any
 from datetime import datetime
 
-from agents import Agent, Runner, trace
+from agents import Agent, Runner
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from litellm.exceptions import RateLimitError
 
@@ -30,6 +30,7 @@ from src import Database
 from templates import RETIREMENT_INSTRUCTIONS
 from agent import create_agent
 from observability import observe
+from src.openai_tracing import traced_agent_execution
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -77,8 +78,13 @@ async def run_retirement_agent(job_id: str, portfolio_data: Dict[str, Any]) -> D
     # Create agent (simplified - no tools or context)
     model, tools, task = create_agent(job_id, portfolio_data, user_preferences, db)
     
-    # Run agent (simplified - no context)
-    with trace("Retirement Agent"):
+    trace_input = {
+        "job_id": job_id,
+        "portfolio_data": portfolio_data,
+        "user_preferences": user_preferences,
+        "task": task,
+    }
+    with traced_agent_execution("retirement", job_id, trace_input) as trace_recorder:
         agent = Agent(
             name="Retirement Specialist",
             instructions=RETIREMENT_INSTRUCTIONS,
@@ -114,11 +120,13 @@ async def run_retirement_agent(job_id: str, portfolio_data: Dict[str, Any]) -> D
         if not success:
             logger.error(f"Failed to save retirement analysis for job {job_id}")
         
-        return {
+        response_payload = {
             'success': success,
             'message': 'Retirement analysis completed' if success else 'Analysis completed but failed to save',
             'final_output': result.final_output
         }
+        trace_recorder.record_output(response_payload)
+        return response_payload
 
 def lambda_handler(event, context):
     """

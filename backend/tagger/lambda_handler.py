@@ -10,6 +10,7 @@ import logging
 from typing import List, Dict, Any
 
 from src import Database
+from src.openai_tracing import traced_agent_execution
 from src.schemas import InstrumentCreate
 from agent import tag_instruments, classification_to_db_format
 from observability import observe
@@ -21,77 +22,83 @@ logger.setLevel(logging.INFO)
 # Initialize database
 db = Database()
 
-async def process_instruments(instruments: List[Dict[str, str]]) -> Dict[str, Any]:
+async def process_instruments(
+    instruments: List[Dict[str, str]],
+    job_id: str | None = None,
+) -> Dict[str, Any]:
     """
     Process and classify instruments asynchronously.
-    
+
     Args:
         instruments: List of instruments to classify
-        
+
     Returns:
         Processing results
     """
-    # Run the classification
-    logger.info(f"Classifying {len(instruments)} instruments")
-    classifications = await tag_instruments(instruments)
-    
-    # Update database with classifications
-    updated = []
-    errors = []
-    
-    for classification in classifications:
-        try:
-            # Convert to database format
-            db_instrument = classification_to_db_format(classification)
-            
-            # Check if instrument exists
-            existing = db.instruments.find_by_symbol(classification.symbol)
-            
-            if existing:
-                # Update existing instrument
-                update_data = db_instrument.model_dump()
-                # Remove symbol as it's the key
-                del update_data['symbol']
-                
-                rows = db.client.update(
-                    'instruments',
-                    update_data,
-                    "symbol = :symbol",
-                    {'symbol': classification.symbol}
-                )
-                logger.info(f"Updated {classification.symbol} in database ({rows} rows)")
-            else:
-                # Create new instrument
-                db.instruments.create_instrument(db_instrument)
-                logger.info(f"Created {classification.symbol} in database")
-            
-            updated.append(classification.symbol)
-            
-        except Exception as e:
-            logger.error(f"Error updating {classification.symbol}: {e}")
-            errors.append({
-                'symbol': classification.symbol,
-                'error': str(e)
-            })
-    
-    # Prepare response (convert Pydantic models to dicts)
-    return {
-        'tagged': len(classifications),
-        'updated': updated,
-        'errors': errors,
-        'classifications': [
-            {
-                'symbol': c.symbol,
-                'name': c.name,
-                'type': c.instrument_type,
-                'current_price': c.current_price,
-                'asset_class': c.allocation_asset_class.model_dump(),
-                'regions': c.allocation_regions.model_dump(),
-                'sectors': c.allocation_sectors.model_dump()
-            }
-            for c in classifications
-        ]
-    }
+    trace_input = {"job_id": job_id, "instruments": instruments}
+    with traced_agent_execution("tagger", job_id, trace_input) as trace_recorder:
+        # Run the classification
+        logger.info(f"Classifying {len(instruments)} instruments")
+        classifications = await tag_instruments(instruments)
+
+        # Update database with classifications
+        updated = []
+        errors = []
+
+        for classification in classifications:
+            try:
+                # Convert to database format
+                db_instrument = classification_to_db_format(classification)
+
+                # Check if instrument exists
+                existing = db.instruments.find_by_symbol(classification.symbol)
+
+                if existing:
+                    # Update existing instrument
+                    update_data = db_instrument.model_dump()
+                    # Remove symbol as it's the key
+                    del update_data['symbol']
+
+                    rows = db.client.update(
+                        'instruments',
+                        update_data,
+                        "symbol = :symbol",
+                        {'symbol': classification.symbol}
+                    )
+                    logger.info(f"Updated {classification.symbol} in database ({rows} rows)")
+                else:
+                    # Create new instrument
+                    db.instruments.create_instrument(db_instrument)
+                    logger.info(f"Created {classification.symbol} in database")
+
+                updated.append(classification.symbol)
+
+            except Exception as e:
+                logger.error(f"Error updating {classification.symbol}: {e}")
+                errors.append({
+                    'symbol': classification.symbol,
+                    'error': str(e)
+                })
+
+        response_payload = {
+            'tagged': len(classifications),
+            'updated': updated,
+            'errors': errors,
+            'classifications': [
+                {
+                    'symbol': c.symbol,
+                    'name': c.name,
+                    'type': c.instrument_type,
+                    'current_price': c.current_price,
+                    'asset_class': c.allocation_asset_class.model_dump(),
+                    'regions': c.allocation_regions.model_dump(),
+                    'sectors': c.allocation_sectors.model_dump()
+                }
+                for c in classifications
+            ]
+        }
+        trace_recorder.record_output(response_payload)
+        return response_payload
 
 def lambda_handler(event, context):
     """
@@ -110,6 +117,7 @@ def lambda_handler(event, context):
         try:
             # Parse the event
             instruments = event.get('instruments', [])
+            job_id = event.get('job_id')
 
             if not instruments:
                 return {
@@ -118,7 +126,7 @@ def lambda_handler(event, context):
                 }
 
             # Process all instruments in a single async context
-            result = asyncio.run(process_instruments(instruments))
+            result = asyncio.run(process_instruments(instruments, job_id))
 
             return {
                 'statusCode': 200,

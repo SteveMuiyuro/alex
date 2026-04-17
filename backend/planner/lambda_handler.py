@@ -10,7 +10,7 @@ import logging
 import base64
 from typing import Dict, Any
 
-from agents import Agent, Runner, trace
+from agents import Agent, Runner
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from litellm.exceptions import RateLimitError
 from fastapi import FastAPI, HTTPException
@@ -28,6 +28,7 @@ from templates import ORCHESTRATOR_INSTRUCTIONS
 from agent import create_agent, handle_missing_instruments, load_portfolio_summary
 from market import update_instrument_prices
 from observability import observe
+from src.openai_tracing import traced_agent_execution
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -63,8 +64,12 @@ async def run_orchestrator(job_id: str) -> None:
         # Create agent with tools and context
         model, tools, task, context = create_agent(job_id, portfolio_summary, db)
         
-        # Run the orchestrator
-        with trace("Planner Orchestrator"):
+        trace_input = {
+            "job_id": job_id,
+            "portfolio_summary": portfolio_summary,
+            "task": task,
+        }
+        with traced_agent_execution("planner", job_id, trace_input) as trace_recorder:
             from agent import PlannerContext
             agent = Agent[PlannerContext](
                 name="Financial Planner",
@@ -78,6 +83,12 @@ async def run_orchestrator(job_id: str) -> None:
                 input=task,
                 context=context,
                 max_turns=20
+            )
+            trace_recorder.record_output(
+                {
+                    "final_output": getattr(result, "final_output", None),
+                    "job_status": "completed",
+                }
             )
             
             # Mark job as completed after all agents finish

@@ -10,8 +10,9 @@ from datetime import datetime
 from dataclasses import dataclass
 import httpx
 
-from agents import function_tool, RunContextWrapper
+from agents import function_span, function_tool, RunContextWrapper
 from agents.extensions.models.litellm_model import LitellmModel
+from src.openai_tracing import dump_trace_json
 
 logger = logging.getLogger()
 
@@ -39,19 +40,25 @@ async def invoke_lambda_agent(
         logger.info(f"[MOCK] Would invoke {agent_name} with payload: {json.dumps(payload)[:200]}")
         return {"success": True, "message": f"[Mock] {agent_name} completed", "mock": True}
 
-    try:
-        logger.info(f"Invoking {agent_name} service: {endpoint}")
-        async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(endpoint, json=payload)
-            response.raise_for_status()
-            result = response.json()
+    span_input = {"agent_name": agent_name, "endpoint": endpoint, "payload": payload}
+    with function_span(name=f"invoke_{agent_name.lower()}", input=dump_trace_json(span_input)) as span:
+        try:
+            logger.info(f"Invoking {agent_name} service: {endpoint}")
+            async with httpx.AsyncClient(timeout=120) as client:
+                response = await client.post(endpoint, json=payload)
+                response.raise_for_status()
+                result = response.json()
 
-        logger.info(f"{agent_name} completed successfully")
-        return result
+            span.span_data.output = dump_trace_json(result)
+            logger.info(f"{agent_name} completed successfully")
+            return result
 
-    except Exception as e:
-        logger.error(f"Error invoking {agent_name}: {e}")
-        return {"error": str(e)}
+        except Exception as e:
+            error_payload = {"type": type(e).__name__, "message": str(e)}
+            span.span_data.output = dump_trace_json({"error": error_payload})
+            span.set_error({"message": str(e), "data": error_payload})
+            logger.error(f"Error invoking {agent_name}: {e}")
+            return {"error": str(e)}
 
 
 def handle_missing_instruments(job_id: str, db) -> None:
@@ -94,9 +101,12 @@ def handle_missing_instruments(job_id: str, db) -> None:
         )
 
         try:
-            with httpx.Client(timeout=120) as client:
-                response = client.post(TAGGER_ENDPOINT, json={"instruments": missing})
-                response.raise_for_status()
+            payload = {"job_id": job_id, "instruments": missing}
+            with function_span(name="invoke_tagger", input=dump_trace_json(payload)) as span:
+                with httpx.Client(timeout=120) as client:
+                    response = client.post(TAGGER_ENDPOINT, json=payload)
+                    response.raise_for_status()
+                    span.span_data.output = dump_trace_json({"status_code": response.status_code})
             logger.info(
                 f"Planner: InstrumentTagger completed - Tagged {len(missing)} instruments"
             )
@@ -168,7 +178,7 @@ async def invoke_reporter_internal(job_id: str) -> str:
     result = await invoke_lambda_agent("Reporter", REPORTER_ENDPOINT, {"job_id": job_id})
 
     if "error" in result:
-        return f"Reporter agent failed: {result['error']}"
+        raise RuntimeError(f"Reporter agent failed: {result['error']}")
 
     return "Reporter agent completed successfully. Portfolio analysis narrative has been generated and saved."
 
@@ -188,7 +198,7 @@ async def invoke_charter_internal(job_id: str) -> str:
     )
 
     if "error" in result:
-        return f"Charter agent failed: {result['error']}"
+        raise RuntimeError(f"Charter agent failed: {result['error']}")
 
     return "Charter agent completed successfully. Portfolio visualizations have been created and saved."
 
@@ -206,7 +216,7 @@ async def invoke_retirement_internal(job_id: str) -> str:
     result = await invoke_lambda_agent("Retirement", RETIREMENT_ENDPOINT, {"job_id": job_id})
 
     if "error" in result:
-        return f"Retirement agent failed: {result['error']}"
+        raise RuntimeError(f"Retirement agent failed: {result['error']}")
 
     return "Retirement agent completed successfully. Retirement projections have been calculated and saved."
 

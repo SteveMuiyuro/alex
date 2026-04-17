@@ -2,9 +2,10 @@
  * API client for backend communication
  */
 import { showToast } from '../components/Toast';
+import { HOME_ROUTE } from './routes';
 
-// API base URL - in production this should resolve to the deployed API URL
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/$/, '');
+
 
 // Type definitions
 export interface User {
@@ -69,7 +70,7 @@ export async function apiRequest<T = unknown>(
     showToast('error', 'Session expired. Please sign in again.');
     // Redirect to home page for re-authentication
     setTimeout(() => {
-      window.location.href = '/';
+      window.location.href = HOME_ROUTE;
     }, 2000);
     throw new Error('Session expired');
   }

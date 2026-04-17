@@ -8,7 +8,7 @@ import logging
 from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator, ConfigDict
-from agents import Agent, Runner, trace
+from agents import Agent, Runner, custom_span
 from agents.extensions.models.litellm_model import LitellmModel
 from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -16,6 +16,7 @@ from litellm.exceptions import RateLimitError
 
 from src.schemas import InstrumentCreate
 from templates import TAGGER_INSTRUCTIONS, CLASSIFICATION_PROMPT
+from src.openai_tracing import stringify_for_trace
 
 # Load environment variables (dotenv automatically searches up the tree)
 load_dotenv(override=True)
@@ -178,8 +179,17 @@ async def classify_instrument(
             symbol=symbol, name=name, instrument_type=instrument_type
         )
 
-        # Run the agent (following gameplan pattern exactly)
-        with trace(f"Classify {symbol}"):
+        # Run inside a child span of the batch trace when available.
+        with custom_span(
+            name="classify_instrument",
+            data={
+                "symbol": symbol,
+                "name": name,
+                "instrument_type": instrument_type,
+                "output": None,
+                "error": None,
+            },
+        ) as classification_span:
             agent = Agent(
                 name="InstrumentTagger",
                 instructions=TAGGER_INSTRUCTIONS,
@@ -188,10 +198,20 @@ async def classify_instrument(
                 output_type=InstrumentClassification,  # Specify structured output type
             )
 
-            result = await Runner.run(agent, input=task, max_turns=5)
+            try:
+                result = await Runner.run(agent, input=task, max_turns=5)
+            except Exception as exc:
+                error_payload = {"type": type(exc).__name__, "message": str(exc)}
+                classification_span.span_data.data["error"] = stringify_for_trace(error_payload)
+                classification_span.set_error({"message": str(exc), "data": error_payload})
+                raise
 
             # Extract the structured output from RunResult using final_output_as
-            return result.final_output_as(InstrumentClassification)
+            classification = result.final_output_as(InstrumentClassification)
+            classification_span.span_data.data["output"] = stringify_for_trace(
+                classification.model_dump()
+            )
+            return classification
 
     except Exception as e:
         logger.error(f"Error classifying {symbol}: {e}")

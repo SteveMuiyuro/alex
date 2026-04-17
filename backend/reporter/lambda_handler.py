@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any
 from datetime import datetime
 
-from agents import Agent, Runner, trace
+from agents import Agent, Runner
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from litellm.exceptions import RateLimitError
 from judge import evaluate
@@ -29,6 +29,7 @@ from src import Database
 from templates import REPORTER_INSTRUCTIONS
 from agent import create_agent, ReporterContext
 from observability import observe
+from src.openai_tracing import traced_agent_execution
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -54,8 +55,13 @@ async def run_reporter_agent(
     # Create agent with tools and context
     model, tools, task, context = create_agent(job_id, portfolio_data, user_data, db)
 
-    # Run agent with context
-    with trace("Reporter Agent"):
+    trace_input = {
+        "job_id": job_id,
+        "portfolio_data": portfolio_data,
+        "user_data": user_data,
+        "task": task,
+    }
+    with traced_agent_execution("reporter", job_id, trace_input) as trace_recorder:
         agent = Agent[ReporterContext](  # Specify the context type
             name="Report Writer", instructions=REPORTER_INSTRUCTIONS, model=model, tools=tools
         )
@@ -93,13 +99,15 @@ async def run_reporter_agent(
         if not success:
             logger.error(f"Failed to save report for job {job_id}")
 
-        return {
+        response_payload = {
             "success": success,
             "message": "Report generated and stored"
             if success
             else "Report generated but failed to save",
             "final_output": result.final_output,
         }
+        trace_recorder.record_output(response_payload)
+        return response_payload
 
 
 def lambda_handler(event, context):
