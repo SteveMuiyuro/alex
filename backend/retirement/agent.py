@@ -239,12 +239,8 @@ def create_agent(
     """Create the retirement agent with tools and context."""
 
     # Get model configuration
-    model_id = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0")
-    # Set region for LiteLLM Bedrock calls
-    bedrock_region = os.getenv("BEDROCK_REGION", "us-west-2")
-    os.environ["AWS_REGION_NAME"] = bedrock_region
-
-    model = LitellmModel(model=f"bedrock/{model_id}")
+    model_id = os.getenv("VERTEX_MODEL", "gemini-2.5-flash")
+    model = LitellmModel(model=f"vertex_ai/{model_id}")
 
     # Extract user preferences
     years_until_retirement = user_preferences.get("years_until_retirement", 30)

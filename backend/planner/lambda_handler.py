@@ -1,5 +1,5 @@
 """
-Financial Planner Orchestrator Lambda Handler
+Financial Planner Orchestrator runtime handler.
 """
 
 import os
@@ -85,11 +85,11 @@ async def run_orchestrator(job_id: str) -> None:
 
 def lambda_handler(event, context):
     """
-    Lambda handler for SQS-triggered orchestration.
+    Runtime handler for queue-triggered orchestration.
 
-    Expected event from SQS:
+    Expected event from Pub/Sub push or generic queue adapters:
     {
-        "Records": [
+        "records": [
             {
                 "body": "job_id"
             }
@@ -99,11 +99,10 @@ def lambda_handler(event, context):
     # Wrap entire handler with observability context
     with observe():
         try:
-            logger.info(f"Planner Lambda invoked with event: {json.dumps(event)[:500]}")
+            logger.info(f"Planner runtime invoked with event: {json.dumps(event)[:500]}")
 
-            # Extract job_id from SQS message
+            # Extract job_id from queue message formats
             if 'Records' in event and len(event['Records']) > 0:
-                # SQS message
                 job_id = event['Records'][0]['body']
                 if isinstance(job_id, str) and job_id.startswith('{'):
                     # Body might be JSON
@@ -112,6 +111,13 @@ def lambda_handler(event, context):
                         job_id = body.get('job_id', job_id)
                     except json.JSONDecodeError:
                         pass
+            elif 'message' in event and isinstance(event['message'], dict):
+                data = event['message'].get('data')
+                if data:
+                    decoded = json.loads(data)
+                    job_id = decoded.get('job_id')
+                else:
+                    job_id = event['message'].get('job_id')
             elif 'job_id' in event:
                 # Direct invocation
                 job_id = event['job_id']

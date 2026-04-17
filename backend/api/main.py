@@ -15,10 +15,10 @@ from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
-import boto3
 from mangum import Mangum
 from dotenv import load_dotenv
 from fastapi_clerk_auth import ClerkConfig, ClerkHTTPBearer, HTTPAuthorizationCredentials
+from google.cloud import pubsub_v1
 
 from src import Database
 from src.schemas import (
@@ -94,9 +94,9 @@ async def general_exception_handler(request: Request, exc: Exception):
 # Initialize services
 db = Database()
 
-# SQS client for job queueing
-sqs_client = boto3.client('sqs', region_name=os.getenv('DEFAULT_AWS_REGION', 'us-east-1'))
-SQS_QUEUE_URL = os.getenv('SQS_QUEUE_URL', '')
+# Pub/Sub publisher for async job queueing
+PUBSUB_TOPIC = os.getenv("PUBSUB_TOPIC", "")
+pubsub_publisher = pubsub_v1.PublisherClient() if PUBSUB_TOPIC else None
 
 # Clerk authentication setup (exactly like saas reference)
 clerk_config = ClerkConfig(jwks_url=os.getenv("CLERK_JWKS_URL"))
@@ -510,22 +510,18 @@ async def trigger_analysis(request: AnalyzeRequest, clerk_user_id: str = Depends
         # Get the created job
         job = db.jobs.find_by_id(job_id)
 
-        # Send to SQS
-        if SQS_QUEUE_URL:
+        # Publish to Pub/Sub
+        if pubsub_publisher and PUBSUB_TOPIC:
             message = {
                 'job_id': str(job_id),
                 'clerk_user_id': clerk_user_id,
                 'analysis_type': request.analysis_type,
                 'options': request.options
             }
-
-            sqs_client.send_message(
-                QueueUrl=SQS_QUEUE_URL,
-                MessageBody=json.dumps(message)
-            )
-            logger.info(f"Sent analysis job to SQS: {job_id}")
+            pubsub_publisher.publish(PUBSUB_TOPIC, json.dumps(message).encode("utf-8"))
+            logger.info(f"Published analysis job to Pub/Sub: {job_id}")
         else:
-            logger.warning("SQS_QUEUE_URL not configured, job created but not queued")
+            logger.warning("PUBSUB_TOPIC not configured, job created but not queued")
 
         return AnalyzeResponse(
             job_id=str(job_id),

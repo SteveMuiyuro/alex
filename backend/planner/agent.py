@@ -4,25 +4,22 @@ Financial Planner Orchestrator Agent - coordinates portfolio analysis across spe
 
 import os
 import json
-import boto3
 import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from dataclasses import dataclass
+import httpx
 
 from agents import function_tool, RunContextWrapper
 from agents.extensions.models.litellm_model import LitellmModel
 
 logger = logging.getLogger()
 
-# Initialize Lambda client
-lambda_client = boto3.client("lambda")
-
-# Lambda function names from environment
-TAGGER_FUNCTION = os.getenv("TAGGER_FUNCTION", "alex-tagger")
-REPORTER_FUNCTION = os.getenv("REPORTER_FUNCTION", "alex-reporter")
-CHARTER_FUNCTION = os.getenv("CHARTER_FUNCTION", "alex-charter")
-RETIREMENT_FUNCTION = os.getenv("RETIREMENT_FUNCTION", "alex-retirement")
+# Agent service endpoints (Cloud Run)
+TAGGER_ENDPOINT = os.getenv("TAGGER_ENDPOINT", "http://localhost:8001/tag")
+REPORTER_ENDPOINT = os.getenv("REPORTER_ENDPOINT", "http://localhost:8002/report")
+CHARTER_ENDPOINT = os.getenv("CHARTER_ENDPOINT", "http://localhost:8003/chart")
+RETIREMENT_ENDPOINT = os.getenv("RETIREMENT_ENDPOINT", "http://localhost:8004/retirement")
 MOCK_LAMBDAS = os.getenv("MOCK_LAMBDAS", "false").lower() == "true"
 
 
@@ -33,9 +30,9 @@ class PlannerContext:
 
 
 async def invoke_lambda_agent(
-    agent_name: str, function_name: str, payload: Dict[str, Any]
+    agent_name: str, endpoint: str, payload: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Invoke a Lambda function for an agent."""
+    """Invoke another agent service endpoint."""
 
     # For local testing with mocked agents
     if MOCK_LAMBDAS:
@@ -43,25 +40,11 @@ async def invoke_lambda_agent(
         return {"success": True, "message": f"[Mock] {agent_name} completed", "mock": True}
 
     try:
-        logger.info(f"Invoking {agent_name} Lambda: {function_name}")
-
-        response = lambda_client.invoke(
-            FunctionName=function_name,
-            InvocationType="RequestResponse",
-            Payload=json.dumps(payload),
-        )
-
-        result = json.loads(response["Payload"].read())
-
-        # Unwrap Lambda response if it has the standard format
-        if isinstance(result, dict) and "statusCode" in result and "body" in result:
-            if isinstance(result["body"], str):
-                try:
-                    result = json.loads(result["body"])
-                except json.JSONDecodeError:
-                    result = {"message": result["body"]}
-            else:
-                result = result["body"]
+        logger.info(f"Invoking {agent_name} service: {endpoint}")
+        async with httpx.AsyncClient(timeout=120) as client:
+            response = await client.post(endpoint, json=payload)
+            response.raise_for_status()
+            result = response.json()
 
         logger.info(f"{agent_name} completed successfully")
         return result
@@ -111,23 +94,12 @@ def handle_missing_instruments(job_id: str, db) -> None:
         )
 
         try:
-            response = lambda_client.invoke(
-                FunctionName=TAGGER_FUNCTION,
-                InvocationType="RequestResponse",
-                Payload=json.dumps({"instruments": missing}),
+            with httpx.Client(timeout=120) as client:
+                response = client.post(TAGGER_ENDPOINT, json={"instruments": missing})
+                response.raise_for_status()
+            logger.info(
+                f"Planner: InstrumentTagger completed - Tagged {len(missing)} instruments"
             )
-
-            result = json.loads(response["Payload"].read())
-
-            if isinstance(result, dict) and "statusCode" in result:
-                if result["statusCode"] == 200:
-                    logger.info(
-                        f"Planner: InstrumentTagger completed - Tagged {len(missing)} instruments"
-                    )
-                else:
-                    logger.error(
-                        f"Planner: InstrumentTagger failed with status {result['statusCode']}"
-                    )
 
         except Exception as e:
             logger.error(f"Planner: Error tagging instruments: {e}")
@@ -193,7 +165,7 @@ async def invoke_reporter_internal(job_id: str) -> str:
     Returns:
         Confirmation message
     """
-    result = await invoke_lambda_agent("Reporter", REPORTER_FUNCTION, {"job_id": job_id})
+    result = await invoke_lambda_agent("Reporter", REPORTER_ENDPOINT, {"job_id": job_id})
 
     if "error" in result:
         return f"Reporter agent failed: {result['error']}"
@@ -212,7 +184,7 @@ async def invoke_charter_internal(job_id: str) -> str:
         Confirmation message
     """
     result = await invoke_lambda_agent(
-        "Charter", CHARTER_FUNCTION, {"job_id": job_id}
+        "Charter", CHARTER_ENDPOINT, {"job_id": job_id}
     )
 
     if "error" in result:
@@ -231,7 +203,7 @@ async def invoke_retirement_internal(job_id: str) -> str:
     Returns:
         Confirmation message
     """
-    result = await invoke_lambda_agent("Retirement", RETIREMENT_FUNCTION, {"job_id": job_id})
+    result = await invoke_lambda_agent("Retirement", RETIREMENT_ENDPOINT, {"job_id": job_id})
 
     if "error" in result:
         return f"Retirement agent failed: {result['error']}"
@@ -263,12 +235,8 @@ def create_agent(job_id: str, portfolio_summary: Dict[str, Any], db):
     context = PlannerContext(job_id=job_id)
 
     # Get model configuration
-    model_id = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0")
-    # Set region for LiteLLM Bedrock calls
-    bedrock_region = os.getenv("BEDROCK_REGION", "us-west-2")
-    os.environ["AWS_REGION_NAME"] = bedrock_region
-
-    model = LitellmModel(model=f"bedrock/{model_id}")
+    model_id = os.getenv("VERTEX_MODEL", "gemini-2.5-flash")
+    model = LitellmModel(model=f"vertex_ai/{model_id}")
 
     tools = [
         invoke_reporter,
