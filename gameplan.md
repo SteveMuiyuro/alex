@@ -4,6 +4,36 @@
 
 **Alex** (Agentic Learning Equities eXplainer) is a multi-agent enterprise-grade SaaS financial planning platform. This is the capstone project for Weeks 3 and 4 of the "AI in Production" course taught by Ed Donner on Udemy that deploys Agent solutions to production.
 
+## ⚠️ GCP Translation Override (Current Repo Reality)
+
+This repository has been substantially translated to **GCP** in infrastructure and much of backend runtime behavior.  
+For current execution, use **`gameplan_gcp.md` as the source of truth** and treat the AWS-oriented sections below as legacy course context.
+When AWS terminology appears in older guide content, treat it as conceptual reference only and use the following GCP equivalents:
+
+- Lambda → Cloud Run
+- API Gateway/SQS → Cloud Run API + Pub/Sub
+- Aurora PostgreSQL → Cloud SQL for PostgreSQL
+- Bedrock/SageMaker → Vertex AI (Gemini + embeddings path)
+- EventBridge → Cloud Scheduler
+- CloudWatch → Cloud Monitoring
+
+### Current Student Progress Assumption
+
+If you have completed deployment up through the database layer, the next milestone is:
+
+> **Get a working backend API on Cloud Run that can authenticate users, publish analysis jobs to Pub/Sub, and persist/fetch data from Cloud SQL.**
+
+### Backend API (GCP) Success Criteria
+
+Before moving to frontend integration, confirm:
+
+1. `alex-api` Cloud Run service is deployed and healthy.
+2. API service env vars are set (`DATABASE_URL`, `PUBSUB_TOPIC`, `CLERK_JWKS_URL`, `VERTEX_MODEL`, `VERTEX_REGION`, `GOOGLE_CLOUD_PROJECT`).
+3. API service account has `Cloud SQL Client` + `Pub/Sub Publisher` (+ logging/monitoring writer).
+4. API can create/read user + portfolio records in Cloud SQL.
+5. API can publish a test analysis message to `alex-analysis-jobs`.
+6. Planner consumer receives the message and updates job state in DB.
+
 The user is a student on the course. You are working with the user to help them build Alex successfully. The user is working in Cursor (the VS Code fork), and they might be on a Windows PC, a Mac (intel or Apple silicon) or a Linux machine. All python code is run with uv and there are uv projects in every directory that needs it. The student is familiar with AWS services (Lambda, App Runner, Cloudfront) and has been introduced to Terraform, uv, NextJS and docker. They have budget alerts set, but they should still regularly check the billing screens in AWS console to keep a close watch on costs.
 
 The student has an AWS root user, and also an IAM user called "aiengineer" with permissions. They have run `aws configure` and should be signed in as the aiengineer user with their default region.
