@@ -4,28 +4,12 @@ Seed data for Alex Financial Planner
 Loads 20+ popular ETF instruments with allocation data
 """
 
-import os
 import json
-import boto3
-from botocore.exceptions import ClientError
 from src.schemas import InstrumentCreate
 from pydantic import ValidationError
-from dotenv import load_dotenv
+from src.client import DataAPIClient
 
-# Load environment variables
-load_dotenv(override=True)
-
-# Get config from environment
-cluster_arn = os.environ.get("AURORA_CLUSTER_ARN")
-secret_arn = os.environ.get("AURORA_SECRET_ARN")
-database = os.environ.get("AURORA_DATABASE", "alex")
-region = os.environ.get("DEFAULT_AWS_REGION", "us-east-1")
-
-if not cluster_arn or not secret_arn:
-    print("❌ Missing AURORA_CLUSTER_ARN or AURORA_SECRET_ARN in .env file")
-    exit(1)
-
-client = boto3.client("rds-data", region_name=region)
+db = DataAPIClient()
 
 # Define popular ETF instruments with realistic allocation data
 # All percentages should sum to 100 for each allocation type
@@ -379,11 +363,8 @@ def insert_instrument(instrument_data):
     """
 
     try:
-        response = client.execute_statement(
-            resourceArn=cluster_arn,
-            secretArn=secret_arn,
-            database=database,
-            sql=sql,
+        db.execute(
+            sql,
             parameters=[
                 {"name": "symbol", "value": {"stringValue": validated["symbol"]}},
                 {"name": "name", "value": {"stringValue": validated["name"]}},
@@ -407,8 +388,8 @@ def insert_instrument(instrument_data):
             ],
         )
         return True
-    except ClientError as e:
-        print(f"    ❌ Error: {e.response['Error']['Message'][:100]}")
+    except Exception as e:
+        print(f"    ❌ Error: {str(e)[:100]}")
         return False
 
 
@@ -467,30 +448,18 @@ def main():
     # Verify by querying
     print("\n🔍 Verifying data...")
     try:
-        response = client.execute_statement(
-            resourceArn=cluster_arn,
-            secretArn=secret_arn,
-            database=database,
-            sql="SELECT COUNT(*) as count FROM instruments",
-        )
-        count = response["records"][0][0]["longValue"]
+        count_rows = db.query("SELECT COUNT(*) as count FROM instruments")
+        count = count_rows[0]["count"] if count_rows else 0
         print(f"  Database now contains {count} instruments")
 
         # Show a sample
-        response = client.execute_statement(
-            resourceArn=cluster_arn,
-            secretArn=secret_arn,
-            database=database,
-            sql="SELECT symbol, name FROM instruments ORDER BY symbol LIMIT 5",
-        )
+        sample_rows = db.query("SELECT symbol, name FROM instruments ORDER BY symbol LIMIT 5")
 
         print("\n  Sample instruments:")
-        for record in response["records"]:
-            symbol = record[0]["stringValue"]
-            name = record[1]["stringValue"]
-            print(f"    - {symbol}: {name}")
+        for record in sample_rows:
+            print(f"    - {record['symbol']}: {record['name']}")
 
-    except ClientError as e:
+    except Exception as e:
         print(f"  ❌ Error verifying: {e}")
 
     print("\n✅ Seed data loaded successfully!")

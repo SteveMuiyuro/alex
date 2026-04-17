@@ -1,10 +1,9 @@
-# Part 3: Ingestion Pipeline Configuration
-# Copy this file to terraform.tfvars and update with your values
+project_id = "alex-prod-project"
+region     = "us-central1"
 
-# Your AWS region for the ingestion infrastructure
-# Should match your DEFAULT_AWS_REGION from .env
-aws_region = "us-east-1"
+vertex_region         = "us-east4"
+documents_bucket_name = "alex-prod-documents"
+ingest_image          = "us-central1-docker.pkg.dev/alex-prod-project/alex/ingest:latest"
 
-# SageMaker endpoint name from Part 2
-# This should be "alex-embedding-endpoint" if you didn't change it
-sagemaker_endpoint_name = "alex-embedding-endpoint"
+matching_engine_index_endpoint = ""
+matching_engine_index_id       = ""

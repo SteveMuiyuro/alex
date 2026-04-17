@@ -1,295 +1,100 @@
 terraform {
-  required_version = ">= 1.5"
-  
+  required_version = ">= 1.6.0"
   required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 5.40"
     }
   }
-  
-  # Using local backend - state will be stored in terraform.tfstate in this directory
-  # This is automatically gitignored for security
 }
 
-provider "aws" {
-  region = var.aws_region
+provider "google" {
+  project = var.project_id
+  region  = var.region
 }
 
-# Data source for current caller identity
-data "aws_caller_identity" "current" {}
+resource "google_project_service" "required" {
+  for_each = toset([
+    "run.googleapis.com",
+    "cloudscheduler.googleapis.com",
+    "aiplatform.googleapis.com",
+  ])
+  project = var.project_id
+  service = each.value
 
-# ========================================
-# ECR Repository
-# ========================================
-
-# ECR repository for the researcher Docker image
-resource "aws_ecr_repository" "researcher" {
-  name                 = "alex-researcher"
-  image_tag_mutability = "MUTABLE"
-  force_delete         = true  # Allow deletion even with images
-  
-  image_scanning_configuration {
-    scan_on_push = false
-  }
-  
-  tags = {
-    Project = "alex"
-    Part    = "4"
-  }
+  disable_on_destroy = false
 }
 
-# ========================================
-# App Runner Service
-# ========================================
+resource "google_service_account" "researcher" {
+  account_id   = "alex-researcher-sa"
+  display_name = "Alex Researcher Service"
+  project      = var.project_id
+}
 
-# IAM role for App Runner
-resource "aws_iam_role" "app_runner_role" {
-  name = "alex-app-runner-role"
-  
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "build.apprunner.amazonaws.com"
-        }
-      },
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "tasks.apprunner.amazonaws.com"
-        }
+resource "google_project_iam_member" "researcher_roles" {
+  for_each = toset([
+    "roles/aiplatform.user",
+    "roles/logging.logWriter",
+    "roles/monitoring.metricWriter",
+  ])
+
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.researcher.email}"
+}
+
+resource "google_cloud_run_v2_service" "researcher" {
+  name     = "alex-researcher"
+  project  = var.project_id
+  location = var.region
+
+  ingress = "INGRESS_TRAFFIC_ALL"
+
+  template {
+    service_account = google_service_account.researcher.email
+
+    containers {
+      image = var.researcher_image
+
+      env {
+        name  = "GOOGLE_CLOUD_PROJECT"
+        value = var.project_id
       }
-    ]
-  })
-  
-  tags = {
-    Project = "alex"
-    Part    = "4"
-  }
-}
-
-# Policy for App Runner to access ECR
-resource "aws_iam_role_policy_attachment" "app_runner_ecr_access" {
-  role       = aws_iam_role.app_runner_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess"
-}
-
-# IAM role for App Runner instance (runtime access to AWS services)
-resource "aws_iam_role" "app_runner_instance_role" {
-  name = "alex-app-runner-instance-role"
-  
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "tasks.apprunner.amazonaws.com"
-        }
+      env {
+        name  = "VERTEX_REGION"
+        value = var.vertex_region
       }
-    ]
-  })
-  
-  tags = {
-    Project = "alex"
-    Part    = "4"
-  }
-}
-
-# Policy for App Runner instance to access Bedrock
-resource "aws_iam_role_policy" "app_runner_instance_bedrock_access" {
-  name = "alex-app-runner-instance-bedrock-policy"
-  role = aws_iam_role.app_runner_instance_role.id
-  
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "bedrock:InvokeModel",
-          "bedrock:InvokeModelWithResponseStream",
-          "bedrock:ListFoundationModels"
-        ]
-        Resource = "*"
+      env {
+        name  = "VERTEX_MODEL"
+        value = var.vertex_model
       }
-    ]
-  })
-}
-
-# App Runner service
-resource "aws_apprunner_service" "researcher" {
-  service_name = "alex-researcher"
-  
-  source_configuration {
-    auto_deployments_enabled = false
-    
-    # Configure authentication for private ECR repository
-    authentication_configuration {
-      access_role_arn = aws_iam_role.app_runner_role.arn
-    }
-    
-    image_repository {
-      image_identifier      = "${aws_ecr_repository.researcher.repository_url}:latest"
-      image_configuration {
-        port = "8000"
-        runtime_environment_variables = {
-          OPENAI_API_KEY    = var.openai_api_key
-          ALEX_API_ENDPOINT = var.alex_api_endpoint
-          ALEX_API_KEY      = var.alex_api_key
-        }
+      env {
+        name  = "INGEST_SERVICE_URL"
+        value = var.ingest_service_url
       }
-      image_repository_type = "ECR"
     }
   }
-  
-  instance_configuration {
-    cpu    = "1 vCPU"
-    memory = "2 GB"
-    instance_role_arn = aws_iam_role.app_runner_instance_role.arn
-  }
-  
-  tags = {
-    Project = "alex"
-    Part    = "4"
-  }
+
+  depends_on = [google_project_service.required]
 }
 
-# ========================================
-# EventBridge Scheduler (Optional)
-# ========================================
-
-# IAM role for EventBridge
-resource "aws_iam_role" "eventbridge_role" {
-  count = var.scheduler_enabled ? 1 : 0
-  name  = "alex-eventbridge-scheduler-role"
-  
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "scheduler.amazonaws.com"
-        }
-      }
-    ]
-  })
-  
-  tags = {
-    Project = "alex"
-    Part    = "4"
-  }
+resource "google_cloud_run_v2_service_iam_member" "invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.researcher.name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }
 
-# Lambda function for invoking researcher
-resource "aws_lambda_function" "scheduler_lambda" {
-  count         = var.scheduler_enabled ? 1 : 0
-  function_name = "alex-researcher-scheduler"
-  role          = aws_iam_role.lambda_scheduler_role[0].arn
-  
-  # Note: The deployment package will be created by the guide instructions
-  filename         = "${path.module}/../../backend/scheduler/lambda_function.zip"
-  source_code_hash = fileexists("${path.module}/../../backend/scheduler/lambda_function.zip") ? filebase64sha256("${path.module}/../../backend/scheduler/lambda_function.zip") : null
-  
-  handler     = "lambda_function.handler"
-  runtime     = "python3.12"
-  timeout     = 180  # 3 minutes to handle App Runner response time
-  memory_size = 256
-  
-  environment {
-    variables = {
-      APP_RUNNER_URL = aws_apprunner_service.researcher.service_url
-    }
-  }
-  
-  tags = {
-    Project = "alex"
-    Part    = "4"
-  }
-}
+resource "google_cloud_scheduler_job" "research_schedule" {
+  count    = var.enable_scheduler ? 1 : 0
+  project  = var.project_id
+  region   = var.region
+  name     = "alex-research-schedule"
+  schedule = var.schedule_cron
 
-# IAM role for scheduler Lambda
-resource "aws_iam_role" "lambda_scheduler_role" {
-  count = var.scheduler_enabled ? 1 : 0
-  name  = "alex-scheduler-lambda-role"
-  
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-  
-  tags = {
-    Project = "alex"
-    Part    = "4"
+  http_target {
+    uri         = "${google_cloud_run_v2_service.researcher.uri}/research/auto"
+    http_method = "POST"
   }
-}
-
-# Lambda basic execution policy
-resource "aws_iam_role_policy_attachment" "lambda_scheduler_basic" {
-  count      = var.scheduler_enabled ? 1 : 0
-  role       = aws_iam_role.lambda_scheduler_role[0].name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
-# EventBridge schedule
-resource "aws_scheduler_schedule" "research_schedule" {
-  count = var.scheduler_enabled ? 1 : 0
-  name  = "alex-research-schedule"
-  
-  flexible_time_window {
-    mode = "OFF"
-  }
-  
-  schedule_expression = "rate(2 hours)"
-  
-  target {
-    arn      = aws_lambda_function.scheduler_lambda[0].arn
-    role_arn = aws_iam_role.eventbridge_role[0].arn
-  }
-}
-
-# Permission for EventBridge to invoke Lambda
-resource "aws_lambda_permission" "allow_eventbridge" {
-  count         = var.scheduler_enabled ? 1 : 0
-  statement_id  = "AllowExecutionFromEventBridge"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.scheduler_lambda[0].function_name
-  principal     = "scheduler.amazonaws.com"
-  source_arn    = aws_scheduler_schedule.research_schedule[0].arn
-}
-
-# Policy for EventBridge to invoke Lambda
-resource "aws_iam_role_policy" "eventbridge_invoke_lambda" {
-  count = var.scheduler_enabled ? 1 : 0
-  name  = "InvokeLambdaPolicy"
-  role  = aws_iam_role.eventbridge_role[0].id
-  
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "lambda:InvokeFunction"
-        ]
-        Resource = aws_lambda_function.scheduler_lambda[0].arn
-      }
-    ]
-  })
 }

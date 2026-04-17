@@ -58,7 +58,7 @@ class DataAPIClient:
         self.secret_arn = secret_arn
         self.region = region
 
-        self.database = database or os.environ.get("DB_NAME") or os.environ.get("AURORA_DATABASE", "alex")
+        self.database = database or os.environ.get("DB_NAME", "alex")
 
         self.database_url = os.environ.get("DATABASE_URL") or self._build_database_url(self.database)
         if not self.database_url:
