@@ -497,7 +497,7 @@ The most common issues relate to AWS region choices! Check environment variables
 - Clerk authentication
 
 **Guide 8**: Enterprise
-- CloudWatch dashboards
+- CloudWatch dashboard
 - Alarms and monitoring
 - LangFuse observability
 - Enhanced logging
