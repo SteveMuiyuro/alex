@@ -5,6 +5,7 @@ Financial Planner Orchestrator runtime handler.
 import os
 import json
 import asyncio
+import base64
 import logging
 import base64
 from typing import Dict, Any
@@ -119,7 +120,8 @@ def lambda_handler(event, context):
             elif 'message' in event and isinstance(event['message'], dict):
                 data = event['message'].get('data')
                 if data:
-                    decoded = json.loads(data)
+                    decoded_json = base64.b64decode(data).decode("utf-8")
+                    decoded = json.loads(decoded_json)
                     job_id = decoded.get('job_id')
                 else:
                     job_id = event['message'].get('job_id')

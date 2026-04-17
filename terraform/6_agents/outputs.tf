@@ -10,9 +10,14 @@ output "planner_subscription" {
 
 output "agent_service_urls" {
   description = "Cloud Run URLs for each agent"
-  value = {
-    for name, svc in google_cloud_run_v2_service.agents : name => svc.uri
-  }
+  value = merge(
+    {
+      planner = google_cloud_run_v2_service.planner.uri
+    },
+    {
+      for name, svc in google_cloud_run_v2_service.workers : name => svc.uri
+    }
+  )
 }
 
 output "agents_service_account" {

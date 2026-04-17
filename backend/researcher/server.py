@@ -1,25 +1,21 @@
-"""
-Alex Researcher Service - Investment Advice Agent (Vertex Native)
-"""
+"""Alex Researcher Service for Cloud Run."""
 
-import os
 import logging
-from datetime import datetime, UTC
+import os
+from datetime import UTC, datetime
 from typing import Optional
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from dotenv import load_dotenv
-
 import vertexai
 from vertexai.preview.generative_models import GenerativeModel
 
-# Silence noise
-logging.basicConfig(level=logging.INFO)
-
-from context import get_agent_instructions, DEFAULT_RESEARCH_PROMPT
+from context import DEFAULT_RESEARCH_PROMPT
 
 load_dotenv(override=True)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Alex Researcher Service")
 
@@ -28,23 +24,24 @@ class ResearchRequest(BaseModel):
     topic: Optional[str] = None
 
 
-# ✅ AUTH
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "alex-vertex-sa.json"
-
-# ✅ INIT (KEEP us-east4)
-vertexai.init(
-    project="alex-prod-project",
-    location="us-east4"
-)
-
-# ✅ WORKING MODEL (from your Studio)
-model = GenerativeModel("gemini-2.5-flash")
+def get_runtime_config() -> tuple[str, str, str]:
+    project_id = os.getenv("GOOGLE_CLOUD_PROJECT", "")
+    region = os.getenv("VERTEX_REGION", "us-east4")
+    model_name = os.getenv("VERTEX_MODEL", "gemini-2.5-flash")
+    return project_id, region, model_name
 
 
-async def run_research_agent(topic: str = None) -> str:
-    if topic:
-        prompt = f"""
-You are an investment research analyst.
+def get_model() -> GenerativeModel:
+    project_id, region, model_name = get_runtime_config()
+    if not project_id:
+        raise RuntimeError("GOOGLE_CLOUD_PROJECT is required")
+    vertexai.init(project=project_id, location=region)
+    return GenerativeModel(model_name)
+
+
+async def run_research_agent(topic: str | None = None) -> str:
+    prompt = (
+        f"""You are an investment research analyst.
 
 Research the following topic and provide:
 - Key trends
@@ -54,42 +51,52 @@ Research the following topic and provide:
 
 Topic: {topic}
 """
-    else:
-        prompt = DEFAULT_RESEARCH_PROMPT
+        if topic
+        else DEFAULT_RESEARCH_PROMPT
+    )
 
     try:
-        response = model.generate_content(prompt)
-
-        # ✅ safer extraction (handles structured responses)
+        response = get_model().generate_content(prompt)
         if hasattr(response, "text") and response.text:
             return response.text
-
-        # fallback (rare cases)
         return str(response)
-
-    except Exception as e:
-        raise Exception(f"Vertex call failed: {str(e)}")
+    except Exception as exc:
+        raise RuntimeError(f"Vertex call failed: {exc}") from exc
 
 
 @app.post("/research")
-async def research(request: ResearchRequest) -> str:
+async def research(request: ResearchRequest) -> dict[str, str]:
     try:
-        return await run_research_agent(request.topic)
-    except Exception as e:
-        print(f"Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        content = await run_research_agent(request.topic)
+        return {"content": content}
+    except Exception as exc:
+        logger.exception("Research request failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/research/auto")
+async def research_auto() -> dict[str, str]:
+    try:
+        content = await run_research_agent()
+        return {"content": content}
+    except Exception as exc:
+        logger.exception("Automated research request failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/health")
-async def health():
+async def health() -> dict[str, str]:
+    project_id, region, model_name = get_runtime_config()
     return {
         "status": "healthy",
-        "model": "gemini-3.1-pro-preview",  # ✅ fixed
-        "region": "us-east4",
+        "project": project_id,
+        "model": model_name,
+        "region": region,
         "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

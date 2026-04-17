@@ -15,7 +15,6 @@ from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
-from mangum import Mangum
 from dotenv import load_dotenv
 from fastapi_clerk_auth import ClerkConfig, ClerkHTTPBearer, HTTPAuthorizationCredentials
 from google.cloud import pubsub_v1
@@ -95,28 +94,20 @@ async def general_exception_handler(request: Request, exc: Exception):
 db = Database()
 
 # Pub/Sub publisher for async job queueing
-PUBSUB_TOPIC = os.getenv("PUBSUB_TOPIC", "")
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "")
+PUBSUB_TOPIC = os.getenv("PUBSUB_TOPIC", "")
 pubsub_publisher = pubsub_v1.PublisherClient() if PUBSUB_TOPIC else None
 
 
-def resolve_pubsub_topic_name(topic_value: str) -> str:
-    """Resolve Pub/Sub topic into fully-qualified topic path."""
-    if not topic_value:
+def get_pubsub_topic_path() -> str:
+    """Return a fully qualified Pub/Sub topic path when possible."""
+    if not PUBSUB_TOPIC:
         return ""
-
-    if topic_value.startswith("projects/"):
-        return topic_value
-
-    if not GOOGLE_CLOUD_PROJECT:
-        raise ValueError(
-            "GOOGLE_CLOUD_PROJECT is required when PUBSUB_TOPIC is not fully-qualified"
-        )
-
-    return pubsub_publisher.topic_path(GOOGLE_CLOUD_PROJECT, topic_value)
-
-
-PUBSUB_TOPIC_PATH = resolve_pubsub_topic_name(PUBSUB_TOPIC) if PUBSUB_TOPIC else ""
+    if PUBSUB_TOPIC.startswith("projects/"):
+        return PUBSUB_TOPIC
+    if GOOGLE_CLOUD_PROJECT:
+        return pubsub_publisher.topic_path(GOOGLE_CLOUD_PROJECT, PUBSUB_TOPIC)
+    return PUBSUB_TOPIC
 
 # Clerk authentication setup (exactly like saas reference)
 clerk_config = ClerkConfig(jwks_url=os.getenv("CLERK_JWKS_URL"))
@@ -531,20 +522,16 @@ async def trigger_analysis(request: AnalyzeRequest, clerk_user_id: str = Depends
         job = db.jobs.find_by_id(job_id)
 
         # Publish to Pub/Sub
-        if pubsub_publisher and PUBSUB_TOPIC_PATH:
+        if pubsub_publisher and PUBSUB_TOPIC:
             message = {
                 'job_id': str(job_id),
                 'clerk_user_id': clerk_user_id,
                 'analysis_type': request.analysis_type,
                 'options': request.options
             }
-            publish_future = pubsub_publisher.publish(
-                PUBSUB_TOPIC_PATH,
-                json.dumps(message).encode("utf-8"),
-                event_type="portfolio_analysis_requested",
-            )
-            message_id = publish_future.result(timeout=10)
-            logger.info(f"Published analysis job to Pub/Sub: {job_id} (message_id={message_id})")
+            topic_path = get_pubsub_topic_path()
+            pubsub_publisher.publish(topic_path, json.dumps(message).encode("utf-8"))
+            logger.info(f"Published analysis job to Pub/Sub: {job_id}")
         else:
             logger.warning("PUBSUB_TOPIC not configured, job created but not queued")
 
@@ -783,9 +770,6 @@ async def populate_test_data(clerk_user_id: str = Depends(get_current_user_id)):
     except Exception as e:
         logger.error(f"Error populating test data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-# Lambda handler
-handler = Mangum(app)
 
 if __name__ == "__main__":
     import uvicorn

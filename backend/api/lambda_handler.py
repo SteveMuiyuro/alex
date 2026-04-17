@@ -1,8 +1,3 @@
-"""Lambda handler for the FastAPI application."""
+"""Compatibility module exporting the native ASGI app for Cloud Run."""
 
-from mangum import Mangum
-from api.main import app
-
-# Create the Lambda handler
-# API Gateway passes the full path including /api/ prefix
-handler = Mangum(app, lifespan="off")
+from main import app

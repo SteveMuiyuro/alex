@@ -1,5 +1,9 @@
 FROM --platform=linux/amd64 python:3.12-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy
+
 WORKDIR /app
 
 # Install Node.js
@@ -15,18 +19,10 @@ RUN npx -y playwright install --with-deps chromium
 # Install Python package manager
 RUN pip install uv
 
-# Copy project files
-COPY pyproject.toml uv.lock ./
+COPY backend/researcher /app
 
-# Install Python dependencies during build
-# uv will automatically install packages for the container's architecture (linux/amd64)
-RUN uv sync --frozen --no-install-project
+RUN uv sync
 
-# Copy application code
-COPY *.py ./
+EXPOSE 8080
 
-# Expose port
-EXPOSE 8000
-
-# Run the application (dependencies already installed)
-CMD ["uv", "run", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uv run uvicorn server:app --host 0.0.0.0 --port ${PORT:-8080}"]

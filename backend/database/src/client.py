@@ -140,13 +140,13 @@ class DataAPIClient:
 
         for col in columns:
             if isinstance(data[col], (dict, list)):
-                placeholders.append(f":{col}::jsonb")
+                placeholders.append(f"CAST(:{col} AS JSONB)")
             elif isinstance(data[col], Decimal):
-                placeholders.append(f":{col}::numeric")
+                placeholders.append(f"CAST(:{col} AS NUMERIC)")
             elif isinstance(data[col], date) and not isinstance(data[col], datetime):
-                placeholders.append(f":{col}::date")
+                placeholders.append(f"CAST(:{col} AS DATE)")
             elif isinstance(data[col], datetime):
-                placeholders.append(f":{col}::timestamp")
+                placeholders.append(f"CAST(:{col} AS TIMESTAMP)")
             else:
                 placeholders.append(f":{col}")
 
@@ -170,13 +170,13 @@ class DataAPIClient:
         set_parts = []
         for col, val in data.items():
             if isinstance(val, (dict, list)):
-                set_parts.append(f"{col} = :{col}::jsonb")
+                set_parts.append(f"{col} = CAST(:{col} AS JSONB)")
             elif isinstance(val, Decimal):
-                set_parts.append(f"{col} = :{col}::numeric")
+                set_parts.append(f"{col} = CAST(:{col} AS NUMERIC)")
             elif isinstance(val, date) and not isinstance(val, datetime):
-                set_parts.append(f"{col} = :{col}::date")
+                set_parts.append(f"{col} = CAST(:{col} AS DATE)")
             elif isinstance(val, datetime):
-                set_parts.append(f"{col} = :{col}::timestamp")
+                set_parts.append(f"{col} = CAST(:{col} AS TIMESTAMP)")
             else:
                 set_parts.append(f"{col} = :{col}")
 
@@ -318,13 +318,11 @@ class DataAPIClient:
         if "doubleValue" in value_obj:
             return value_obj["doubleValue"]
         if "stringValue" in value_obj:
-            raw = value_obj["stringValue"]
-            if isinstance(raw, str) and raw and raw[0] in ["{", "["]:
-                try:
-                    return json.loads(raw)
-                except json.JSONDecodeError:
-                    return raw
-            return raw
+            # Keep strings as strings for SQL parameter binding.
+            # JSON payloads are explicitly cast in SQL and should be passed
+            # as their serialized string representation, not converted back
+            # into Python dict/list objects.
+            return value_obj["stringValue"]
         if "blobValue" in value_obj:
             return value_obj["blobValue"]
         return None

@@ -13,5 +13,4 @@ agent_images = {
   reporter   = "us-central1-docker.pkg.dev/alex-prod-project/alex/reporter:latest"
   charter    = "us-central1-docker.pkg.dev/alex-prod-project/alex/charter:latest"
   retirement = "us-central1-docker.pkg.dev/alex-prod-project/alex/retirement:latest"
-  researcher = "us-central1-docker.pkg.dev/alex-prod-project/alex/researcher:latest"
 }

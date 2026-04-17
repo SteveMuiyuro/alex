@@ -24,7 +24,7 @@ class BaseModel:
     
     def find_by_id(self, id: Any) -> Optional[Dict]:
         """Find a record by ID"""
-        sql = f"SELECT * FROM {self.table_name} WHERE id = :id::uuid"
+        sql = f"SELECT * FROM {self.table_name} WHERE id = CAST(:id AS UUID)"
         return self.db.query_one(sql, [{'name': 'id', 'value': {'stringValue': str(id)}}])
     
     def find_all(self, limit: int = 100, offset: int = 0) -> List[Dict]:
@@ -42,11 +42,11 @@ class BaseModel:
     
     def update(self, id: Any, data: Dict) -> int:
         """Update a record by ID"""
-        return self.db.update(self.table_name, data, "id = :id::uuid", {'id': str(id)})
+        return self.db.update(self.table_name, data, "id = CAST(:id AS UUID)", {'id': str(id)})
     
     def delete(self, id: Any) -> int:
         """Delete a record by ID"""
-        return self.db.delete(self.table_name, "id = :id::uuid", {'id': str(id)})
+        return self.db.delete(self.table_name, "id = CAST(:id AS UUID)", {'id': str(id)})
 
 
 class Users(BaseModel):
@@ -163,7 +163,7 @@ class Positions(BaseModel):
             SELECT p.*, i.name as instrument_name, i.instrument_type, i.current_price
             FROM {self.table_name} p
             JOIN instruments i ON p.symbol = i.symbol
-            WHERE p.account_id = :account_id::uuid
+            WHERE p.account_id = CAST(:account_id AS UUID)
             ORDER BY p.symbol
         """
         params = [{'name': 'account_id', 'value': {'stringValue': account_id}}]
@@ -178,7 +178,7 @@ class Positions(BaseModel):
                 SUM(p.quantity) as total_shares
             FROM positions p
             JOIN instruments i ON p.symbol = i.symbol
-            WHERE p.account_id = :account_id::uuid
+            WHERE p.account_id = CAST(:account_id AS UUID)
         """
         params = [
             {'name': 'account_id', 'value': {'stringValue': account_id}}
@@ -197,7 +197,7 @@ class Positions(BaseModel):
         # Use UPSERT to handle existing positions
         sql = """
             INSERT INTO positions (account_id, symbol, quantity, as_of_date)
-            VALUES (:account_id::uuid, :symbol, :quantity::numeric, :as_of_date::date)
+            VALUES (CAST(:account_id AS UUID), :symbol, CAST(:quantity AS NUMERIC), CAST(:as_of_date AS DATE))
             ON CONFLICT (account_id, symbol) 
             DO UPDATE SET 
                 quantity = EXCLUDED.quantity,
@@ -244,27 +244,27 @@ class Jobs(BaseModel):
         if error_message:
             data['error_message'] = error_message
         
-        return self.db.update(self.table_name, data, "id = :id::uuid", {'id': job_id})
+        return self.db.update(self.table_name, data, "id = CAST(:id AS UUID)", {'id': job_id})
     
     def update_report(self, job_id: str, report_payload: Dict) -> int:
         """Update job with Reporter agent's analysis"""
         data = {'report_payload': report_payload}
-        return self.db.update(self.table_name, data, "id = :id::uuid", {'id': job_id})
+        return self.db.update(self.table_name, data, "id = CAST(:id AS UUID)", {'id': job_id})
     
     def update_charts(self, job_id: str, charts_payload: Dict) -> int:
         """Update job with Charter agent's visualization data"""
         data = {'charts_payload': charts_payload}
-        return self.db.update(self.table_name, data, "id = :id::uuid", {'id': job_id})
+        return self.db.update(self.table_name, data, "id = CAST(:id AS UUID)", {'id': job_id})
     
     def update_retirement(self, job_id: str, retirement_payload: Dict) -> int:
         """Update job with Retirement agent's projections"""
         data = {'retirement_payload': retirement_payload}
-        return self.db.update(self.table_name, data, "id = :id::uuid", {'id': job_id})
+        return self.db.update(self.table_name, data, "id = CAST(:id AS UUID)", {'id': job_id})
     
     def update_summary(self, job_id: str, summary_payload: Dict) -> int:
         """Update job with Planner's final summary"""
         data = {'summary_payload': summary_payload}
-        return self.db.update(self.table_name, data, "id = :id::uuid", {'id': job_id})
+        return self.db.update(self.table_name, data, "id = CAST(:id AS UUID)", {'id': job_id})
     
     def find_by_user(self, clerk_user_id: str, status: str = None, 
                     limit: int = 20) -> List[Dict]:
