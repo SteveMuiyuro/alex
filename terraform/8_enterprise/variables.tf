@@ -1,17 +1,16 @@
-variable "aws_region" {
-  description = "AWS region for deployment"
+variable "project_id" {
+  description = "GCP project ID"
   type        = string
-  default     = "us-east-1"
 }
 
-variable "bedrock_region" {
-  description = "AWS region for Bedrock (may differ from main region)"
+variable "region" {
+  description = "Primary region"
   type        = string
-  default     = "us-west-2"
+  default     = "us-central1"
 }
 
-variable "bedrock_model_id" {
-  description = "Bedrock model ID to monitor (e.g., amazon.nova-pro-v1:0)"
+variable "dashboard_name" {
+  description = "Cloud Monitoring dashboard name"
   type        = string
-  default     = "amazon.nova-pro-v1:0"
+  default     = "alex-enterprise-observability"
 }

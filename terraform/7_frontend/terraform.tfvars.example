@@ -1,11 +1,13 @@
-# Part 7: Frontend & API Configuration
+project_id = "alex-prod-project"
+region     = "us-central1"
 
-# AWS region for deployment
-aws_region = "us-east-1"
+frontend_bucket_name = "alex-prod-frontend"
+api_image            = "us-central1-docker.pkg.dev/alex-prod-project/alex/api:latest"
 
-# Clerk configuration for JWT validation
-# Get these from your Clerk dashboard
-# The JWKS URL is: https://[your-instance].clerk.accounts.dev/.well-known/jwks.json
-# The issuer is: https://[your-instance].clerk.accounts.dev
-clerk_jwks_url = "https://engaging-feline-80.clerk.accounts.dev/.well-known/jwks.json"
-clerk_issuer   = "https://engaging-feline-80.clerk.accounts.dev"
+database_url = "postgresql+psycopg2://alex_app:CHANGE_ME@<CLOUD_SQL_IP>:5432/alex"
+pubsub_topic = "alex-analysis-jobs"
+
+clerk_jwks_url = "https://your-app.clerk.accounts.dev/.well-known/jwks.json"
+
+vertex_model  = "gemini-2.5-flash"
+vertex_region = "us-east4"
