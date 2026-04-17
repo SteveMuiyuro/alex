@@ -3,7 +3,7 @@
  */
 import { showToast } from '../components/Toast';
 
-// API base URL - in production this will be the API Gateway URL
+// API base URL - in production this should resolve to the deployed API URL
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Type definitions

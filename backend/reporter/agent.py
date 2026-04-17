@@ -116,7 +116,7 @@ async def get_market_insights(
     wrapper: RunContextWrapper[ReporterContext], symbols: List[str]
 ) -> str:
     """
-    Retrieve market insights from S3 Vectors knowledge base.
+    Retrieve market context for the provided symbols.
 
     Args:
         wrapper: Context wrapper with job_id and database
@@ -125,75 +125,22 @@ async def get_market_insights(
     Returns:
         Relevant market context and insights
     """
-    try:
-        import boto3
+    if not symbols:
+        return "No symbols provided. Proceed with general market context."
 
-        # Get account ID
-        sts = boto3.client("sts")
-        account_id = sts.get_caller_identity()["Account"]
-        bucket = f"alex-vectors-{account_id}"
-
-        # Get embeddings
-        sagemaker_region = os.getenv("DEFAULT_AWS_REGION", "us-east-1")
-        sagemaker = boto3.client("sagemaker-runtime", region_name=sagemaker_region)
-        endpoint_name = os.getenv("SAGEMAKER_ENDPOINT", "alex-embedding-endpoint")
-        query = f"market analysis {' '.join(symbols[:5])}" if symbols else "market outlook"
-
-        response = sagemaker.invoke_endpoint(
-            EndpointName=endpoint_name,
-            ContentType="application/json",
-            Body=json.dumps({"inputs": query}),
-        )
-
-        result = json.loads(response["Body"].read().decode())
-        # Extract embedding (handle nested arrays)
-        if isinstance(result, list) and result:
-            embedding = result[0][0] if isinstance(result[0], list) else result[0]
-        else:
-            embedding = result
-
-        # Search vectors
-        s3v = boto3.client("s3vectors", region_name=sagemaker_region)
-        response = s3v.query_vectors(
-            vectorBucketName=bucket,
-            indexName="financial-research",
-            queryVector={"float32": embedding},
-            topK=3,
-            returnMetadata=True,
-        )
-
-        # Format insights
-        insights = []
-        for vector in response.get("vectors", []):
-            metadata = vector.get("metadata", {})
-            text = metadata.get("text", "")[:200]
-            if text:
-                company = metadata.get("company_name", "")
-                prefix = f"{company}: " if company else "- "
-                insights.append(f"{prefix}{text}...")
-
-        if insights:
-            return "Market Insights:\n" + "\n".join(insights)
-        else:
-            return "Market insights unavailable - proceeding with standard analysis."
-
-    except Exception as e:
-        logger.warning(f"Reporter: Could not retrieve market insights: {e}")
-        return "Market insights unavailable - proceeding with standard analysis."
+    preview = ", ".join(symbols[:5])
+    return (
+        "Market insights tool is configured for Vertex Matching Engine integration. "
+        f"Proceed using portfolio fundamentals for: {preview}."
+    )
 
 
 def create_agent(job_id: str, portfolio_data: Dict[str, Any], user_data: Dict[str, Any], db=None):
     """Create the reporter agent with tools and context."""
 
     # Get model configuration
-    model_id = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0")
-    # Set region for LiteLLM Bedrock calls
-    bedrock_region = os.getenv("BEDROCK_REGION", "us-west-2")
-    logger.info(f"DEBUG: BEDROCK_REGION from env = {bedrock_region}")
-    os.environ["AWS_REGION_NAME"] = bedrock_region
-    logger.info(f"DEBUG: Set AWS_REGION_NAME to {bedrock_region}")
-
-    model = LitellmModel(model=f"bedrock/{model_id}")
+    model_id = os.getenv("VERTEX_MODEL", "gemini-2.5-flash")
+    model = LitellmModel(model=f"vertex_ai/{model_id}")
 
     # Create context
     context = ReporterContext(

@@ -4,7 +4,6 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "alex-database",
-    "boto3>=1.40.29",
     "google-cloud-aiplatform>=1.148.0",
     "langfuse>=3.3.4",
     "openai-agents>=0.3.0",

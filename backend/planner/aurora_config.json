@@ -1,6 +1,5 @@
 {
-  "cluster_arn": "arn:aws:rds:us-east-1:392340646348:cluster:alex-aurora-cluster",
-  "secret_arn": "arn:aws:secretsmanager:us-east-1:392340646348:secret:alex-aurora-data-api-credentials-aGIMlV",
-  "database": "alex",
-  "region": "us-east-1"
+  "database_url": "postgresql+psycopg2://alex_app:CHANGE_ME@127.0.0.1:5432/alex",
+  "project_id": "alex-prod-project",
+  "region": "us-central1"
 }

@@ -1,110 +1,44 @@
-# Terraform Infrastructure
+# Alex Terraform (GCP)
 
-This directory contains Terraform configurations for the Alex Financial Planner project.
+This directory contains independent Terraform modules for each implementation phase on **GCP**.
 
-## Structure
+## Module layout
 
-Each part of the course has its own independent Terraform directory:
+- `2_sagemaker/` *(kept folder name for course continuity)*: Vertex AI API + optional Matching Engine endpoint
+- `3_ingestion/`: Cloud Run ingestion service + GCS document bucket
+- `4_researcher/`: Cloud Run researcher + optional Cloud Scheduler trigger
+- `5_database/`: Cloud SQL PostgreSQL
+- `6_agents/`: Pub/Sub orchestration + Cloud Run agent services
+- `7_frontend/`: Cloud Run API + static frontend bucket
+- `8_enterprise/`: Cloud Monitoring dashboard
 
-- **`2_sagemaker/`** - SageMaker serverless endpoint for embeddings (Guide 2)
-- **`3_ingestion/`** - S3 Vectors, Lambda, and API Gateway for document ingestion (Guide 3)
-- **`4_researcher/`** - App Runner service for AI researcher agent (Guide 4)
-- **`5_database/`** - Aurora Serverless v2 PostgreSQL with Data API (Guide 5)
-- **`6_agents/`** - Lambda functions for agent orchestra (Guide 6)
-- **`7_frontend/`** - API Lambda and frontend infrastructure (Guide 7)
-- **`8_observability/`** - LangFuse and monitoring setup (Guide 8)
+## Design principles
 
-## Key Design Decisions
+1. **Independent state per module**
+2. **Minimal managed services (no over-engineering)**
+3. **Cloud-native GCP replacements for queue/runtime/monitoring**
 
-### Why Separate Directories?
-
-1. **Educational Clarity**: Each guide corresponds to exactly one Terraform directory
-2. **Independent Deployment**: Students can deploy each part without affecting others
-3. **Reduced Risk**: Mistakes in one part don't impact previously deployed infrastructure
-4. **Progressive Learning**: Can't accidentally deploy later parts before completing earlier ones
-
-### Why Local State?
-
-1. **Simplicity**: No need to set up and manage an S3 state bucket
-2. **Zero Dependencies**: Can start deploying immediately without prerequisite infrastructure
-3. **Cost Savings**: No S3 storage costs for state files
-4. **Security**: State files are automatically gitignored
-
-## Usage
-
-For each part of the course:
+## Typical workflow
 
 ```bash
-# Navigate to the specific part's directory
-cd terraform/2_sagemaker  # (or 3_ingestion, 4_researcher, etc.)
-
-# Initialize Terraform (only needed once per directory)
+cd terraform/5_database
+cp terraform.tfvars.example terraform.tfvars
 terraform init
-
-# Review what will be created
-terraform plan
-
-# Deploy the infrastructure
 terraform apply
-
-# When done with that part (optional)
-terraform destroy
 ```
 
-## Environment Variables
+Repeat per module in order.
 
-Some Terraform configurations require environment variables from your `.env` file:
+## Required environment variables (application runtime)
 
-- `OPENAI_API_KEY` - For the researcher agent (Part 4)
-- `ALEX_API_ENDPOINT` - API Gateway endpoint (from Part 3)
-- `ALEX_API_KEY` - API key for ingestion (from Part 3)
-- `AURORA_CLUSTER_ARN` - Aurora cluster ARN (from Part 5)
-- `AURORA_SECRET_ARN` - Secrets Manager ARN (from Part 5)
-- `VECTOR_BUCKET` - S3 Vectors bucket name (from Part 3)
-- `BEDROCK_MODEL_ID` - Bedrock model to use (Part 6)
+- `DATABASE_URL`
+- `GOOGLE_CLOUD_PROJECT`
+- `VERTEX_REGION`
+- `VERTEX_MODEL`
+- `PUBSUB_TOPIC`
+- `CLERK_JWKS_URL` (API)
 
-## State Management
+## Notes
 
-- Each directory maintains its own `terraform.tfstate` file
-- State files are stored locally (not in S3)
-- All `*.tfstate` files are gitignored for security
-- Back up state files before making major changes
-
-## Production Considerations
-
-This structure is optimized for learning. In production, you might consider:
-
-- **Remote State**: Store state in S3 with state locking via DynamoDB
-- **Modules**: Share common configurations across environments
-- **Workspaces**: Manage multiple environments (dev, staging, prod)
-- **CI/CD**: Automated deployment pipelines
-- **Terragrunt**: Orchestrate multiple Terraform configurations
-
-## Troubleshooting
-
-If you encounter issues:
-
-1. **State Conflicts**: Each directory has independent state. If you need to import existing resources:
-   ```bash
-   terraform import <resource_type>.<resource_name> <resource_id>
-   ```
-
-2. **Missing Dependencies**: Ensure you've completed earlier guides and have the required environment variables
-
-3. **Clean Slate**: To start over in any directory:
-   ```bash
-   terraform destroy  # Remove resources
-   rm -rf .terraform terraform.tfstate*  # Clean local files
-   terraform init  # Reinitialize
-   ```
-
-## Cleanup Helper
-
-To clean up old monolithic Terraform files (if upgrading from an older version):
-
-```bash
-cd terraform
-python cleanup_old_structure.py
-```
-
-This will identify old files that can be safely removed.
+- Cloud SQL is currently configured for **public IP + authorized networks** for dev speed.
+- Recommended next hardening step: Cloud SQL private connectivity + Serverless VPC Access.

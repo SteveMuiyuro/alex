@@ -1,6 +1,6 @@
 """
 Lambda function to trigger App Runner research endpoint.
-Called by EventBridge on a schedule.
+Called by a scheduler on a schedule.
 """
 import os
 import urllib.request

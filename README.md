@@ -36,3 +36,10 @@ _If you're looking at this in Cursor, please right click on the filename in the 
 - Please submit your community_contributions, including links to your repos, in the production repo community_contributions folder
 - Regularly do a git pull to get the latest code
 - Reach out in Udemy or email (ed@edwarddonner.com) if I can help! This is a gigantic project and I am here to help you deliver it!
+
+#### Quick pre-flight checklist (before running deploy/package scripts)
+
+- Confirm Docker Desktop is running and healthy (`docker ps` should work).
+- Confirm you are using the intended AWS account and region (`aws sts get-caller-identity` and `aws configure list`).
+- In each Terraform folder, copy `terraform.tfvars.example` to `terraform.tfvars` and fill all required variables before `terraform apply`.
+- Use `uv` for Python commands in each project directory (`uv run ...`, `uv add ...`), not `pip` or raw `python`.
