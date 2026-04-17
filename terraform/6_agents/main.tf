@@ -41,6 +41,10 @@ resource "google_pubsub_subscription" "planner" {
   project = var.project_id
 
   ack_deadline_seconds = 60
+
+  push_config {
+    push_endpoint = "${google_cloud_run_v2_service.agents["planner"].uri}/pubsub/push"
+  }
 }
 
 resource "google_service_account" "agents" {
@@ -112,4 +116,12 @@ resource "google_cloud_run_v2_service" "agents" {
   }
 
   depends_on = [google_project_service.required]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "planner_public_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.agents["planner"].name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
 }

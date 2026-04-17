@@ -96,7 +96,27 @@ db = Database()
 
 # Pub/Sub publisher for async job queueing
 PUBSUB_TOPIC = os.getenv("PUBSUB_TOPIC", "")
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "")
 pubsub_publisher = pubsub_v1.PublisherClient() if PUBSUB_TOPIC else None
+
+
+def resolve_pubsub_topic_name(topic_value: str) -> str:
+    """Resolve Pub/Sub topic into fully-qualified topic path."""
+    if not topic_value:
+        return ""
+
+    if topic_value.startswith("projects/"):
+        return topic_value
+
+    if not GOOGLE_CLOUD_PROJECT:
+        raise ValueError(
+            "GOOGLE_CLOUD_PROJECT is required when PUBSUB_TOPIC is not fully-qualified"
+        )
+
+    return pubsub_publisher.topic_path(GOOGLE_CLOUD_PROJECT, topic_value)
+
+
+PUBSUB_TOPIC_PATH = resolve_pubsub_topic_name(PUBSUB_TOPIC) if PUBSUB_TOPIC else ""
 
 # Clerk authentication setup (exactly like saas reference)
 clerk_config = ClerkConfig(jwks_url=os.getenv("CLERK_JWKS_URL"))
@@ -511,15 +531,20 @@ async def trigger_analysis(request: AnalyzeRequest, clerk_user_id: str = Depends
         job = db.jobs.find_by_id(job_id)
 
         # Publish to Pub/Sub
-        if pubsub_publisher and PUBSUB_TOPIC:
+        if pubsub_publisher and PUBSUB_TOPIC_PATH:
             message = {
                 'job_id': str(job_id),
                 'clerk_user_id': clerk_user_id,
                 'analysis_type': request.analysis_type,
                 'options': request.options
             }
-            pubsub_publisher.publish(PUBSUB_TOPIC, json.dumps(message).encode("utf-8"))
-            logger.info(f"Published analysis job to Pub/Sub: {job_id}")
+            publish_future = pubsub_publisher.publish(
+                PUBSUB_TOPIC_PATH,
+                json.dumps(message).encode("utf-8"),
+                event_type="portfolio_analysis_requested",
+            )
+            message_id = publish_future.result(timeout=10)
+            logger.info(f"Published analysis job to Pub/Sub: {job_id} (message_id={message_id})")
         else:
             logger.warning("PUBSUB_TOPIC not configured, job created but not queued")
 
