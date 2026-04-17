@@ -44,7 +44,7 @@ A “working backend API” means:
 
 ## 4) GCP Console Checklist for Backend API
 
-## Step A — APIs
+## Step A — API
 In **APIs & Services**, enable:
 - Cloud Run API
 - Artifact Registry API
