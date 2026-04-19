@@ -9,8 +9,10 @@ import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from decimal import Decimal
+from time import monotonic
 import uuid
 
+import httpx
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -20,6 +22,8 @@ from fastapi_clerk_auth import ClerkConfig, ClerkHTTPBearer, HTTPAuthorizationCr
 from google.cloud import pubsub_v1
 
 from src import Database
+from src.job_progress import derive_job_progress, mark_job_progress
+from src.openai_tracing import observe
 from src.schemas import (
     UserCreate,
     AccountCreate,
@@ -100,6 +104,14 @@ db = Database()
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "")
 PUBSUB_TOPIC = os.getenv("PUBSUB_TOPIC", "")
 pubsub_publisher = pubsub_v1.PublisherClient() if PUBSUB_TOPIC else None
+POLYGON_API_KEY = os.getenv("POLYGON_API_KEY", "")
+POLYGON_PLAN = os.getenv("POLYGON_PLAN", "free")
+POLYGON_BASE_URL = "https://api.polygon.io"
+# Keep the symbol set small enough for the free-plan request budget while still
+# giving a useful cross-section of major market benchmarks and leaders.
+MARKET_SNAPSHOT_SYMBOLS = ["SPY", "QQQ", "DIA", "AAPL", "MSFT", "NVDA"]
+MARKET_CACHE_TTL_SECONDS = 300
+market_snapshot_cache: dict[str, Any] = {"expires_at": 0.0, "payload": None}
 
 
 def get_pubsub_topic_path() -> str:
@@ -110,6 +122,98 @@ def get_pubsub_topic_path() -> str:
     if GOOGLE_CLOUD_PROJECT:
         return pubsub_publisher.topic_path(GOOGLE_CLOUD_PROJECT, PUBSUB_TOPIC)
     return PUBSUB_TOPIC
+
+
+async def fetch_polygon_market_snapshot() -> dict[str, Any]:
+    """Fetch a delayed market snapshot suitable for dashboard display."""
+    if not POLYGON_API_KEY:
+        return {
+            "quotes": [],
+            "news": [],
+            "delayed": True,
+            "source": "polygon",
+            "plan": POLYGON_PLAN,
+            "as_of": None,
+            "unavailable_reason": "POLYGON_API_KEY is not configured",
+        }
+
+    if market_snapshot_cache["payload"] and market_snapshot_cache["expires_at"] > monotonic():
+        return market_snapshot_cache["payload"]
+
+    quotes: list[dict[str, Any]] = []
+    news: list[dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=20) as client:
+        for symbol in MARKET_SNAPSHOT_SYMBOLS:
+            try:
+                prev_response = await client.get(
+                    f"{POLYGON_BASE_URL}/v2/aggs/ticker/{symbol}/prev",
+                    params={"adjusted": "true", "apiKey": POLYGON_API_KEY},
+                )
+                prev_response.raise_for_status()
+                prev_payload = prev_response.json()
+                results = prev_payload.get("results") or []
+                if not results:
+                    logger.info("Polygon previous-day data returned no rows for %s", symbol)
+                    continue
+
+                bar = results[0]
+                open_price = bar.get("o")
+                close_price = bar.get("c")
+                if open_price in (None, 0) or close_price is None:
+                    continue
+
+                change = float(close_price) - float(open_price)
+                change_percent = (change / float(open_price)) * 100 if open_price else 0.0
+                quotes.append(
+                    {
+                        "symbol": symbol,
+                        "price": round(float(close_price), 2),
+                        "change": round(change, 2),
+                        "change_percent": round(change_percent, 2),
+                        "updated_at": bar.get("t"),
+                    }
+                )
+            except Exception as exc:
+                logger.info("Polygon previous-day quote unavailable for %s: %s", symbol, exc)
+
+        try:
+            news_response = await client.get(
+                f"{POLYGON_BASE_URL}/v2/reference/news",
+                params={
+                    "limit": 4,
+                    "order": "desc",
+                    "sort": "published_utc",
+                    "apiKey": POLYGON_API_KEY,
+                },
+            )
+            news_response.raise_for_status()
+            news_payload = news_response.json()
+            for item in news_payload.get("results", []):
+                news.append(
+                    {
+                        "id": item.get("id"),
+                        "title": item.get("title"),
+                        "publisher": (item.get("publisher") or {}).get("name"),
+                        "published_utc": item.get("published_utc"),
+                        "article_url": item.get("article_url"),
+                        "tickers": item.get("tickers", []),
+                    }
+                )
+        except Exception as exc:
+            logger.info("Polygon news unavailable for current plan or request: %s", exc)
+
+    payload = {
+        "quotes": quotes,
+        "news": news,
+        "delayed": True,
+        "source": "polygon",
+        "plan": POLYGON_PLAN,
+        "as_of": datetime.utcnow().isoformat(),
+        "symbols": MARKET_SNAPSHOT_SYMBOLS,
+    }
+    market_snapshot_cache["payload"] = payload
+    market_snapshot_cache["expires_at"] = monotonic() + MARKET_CACHE_TTL_SECONDS
+    return payload
 
 # Clerk auth
 clerk_config = ClerkConfig(
@@ -417,40 +521,95 @@ async def list_instruments(clerk_user_id: str = Depends(get_current_user_id)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/market-snapshot")
+async def market_snapshot(clerk_user_id: str = Depends(get_current_user_id)):
+    """Return delayed dashboard market data and recent news from Polygon."""
+    try:
+        return await fetch_polygon_market_snapshot()
+    except Exception as e:
+        logger.error("Error fetching market snapshot: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to fetch delayed market snapshot")
+
+
 @app.post("/api/analyze", response_model=AnalyzeResponse)
 async def trigger_analysis(request: AnalyzeRequest, clerk_user_id: str = Depends(get_current_user_id)):
     """Trigger portfolio analysis."""
-    try:
-        user = db.users.find_by_clerk_id(clerk_user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        job_id = db.jobs.create_job(
-            clerk_user_id=clerk_user_id,
-            job_type="portfolio_analysis",
-            request_payload=request.model_dump(),
-        )
-
-        if pubsub_publisher and PUBSUB_TOPIC:
-            message = {
-                "job_id": str(job_id),
-                "clerk_user_id": clerk_user_id,
+    with observe() as observability:
+        with observability.start_as_current_span(
+            name="api_trigger_analysis",
+            input={
                 "analysis_type": request.analysis_type,
                 "options": request.options,
-            }
-            topic_path = get_pubsub_topic_path()
-            pubsub_publisher.publish(topic_path, json.dumps(message).encode("utf-8"))
-            logger.info("Published analysis job to Pub/Sub: %s", job_id)
-        else:
-            logger.warning("PUBSUB_TOPIC not configured, job created but not queued")
+                "clerk_user_id": clerk_user_id,
+            },
+            metadata={"service": "api", "route": "/api/analyze"},
+        ) as span:
+            try:
+                user = db.users.find_by_clerk_id(clerk_user_id)
+                if not user:
+                    raise HTTPException(status_code=404, detail="User not found")
 
-        return AnalyzeResponse(
-            job_id=str(job_id),
-            message="Analysis started. Check job status for results.",
-        )
-    except Exception as e:
-        logger.error("Error triggering analysis: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+                job_id = db.jobs.create_job(
+                    clerk_user_id=clerk_user_id,
+                    job_type="portfolio_analysis",
+                    request_payload=request.model_dump(),
+                )
+                span.update_trace(
+                    name="portfolio_analysis_job",
+                    user_id=clerk_user_id,
+                    session_id=str(job_id),
+                    metadata={
+                        "service": "api",
+                        "analysis_type": request.analysis_type,
+                    },
+                )
+                mark_job_progress(
+                    db,
+                    str(job_id),
+                    "queued",
+                    message="Analysis request queued for the Financial Planner.",
+                )
+                observability.create_event(
+                    name="analysis_job_created",
+                    input={"job_id": str(job_id), "analysis_type": request.analysis_type},
+                )
+
+                if pubsub_publisher and PUBSUB_TOPIC:
+                    message = {
+                        "job_id": str(job_id),
+                        "clerk_user_id": clerk_user_id,
+                        "analysis_type": request.analysis_type,
+                        "options": request.options,
+                    }
+                    topic_path = get_pubsub_topic_path()
+                    pubsub_publisher.publish(topic_path, json.dumps(message).encode("utf-8"))
+                    logger.info("Published analysis job to Pub/Sub: %s", job_id)
+                    observability.create_event(
+                        name="analysis_job_published",
+                        input={"job_id": str(job_id), "topic": topic_path},
+                    )
+                else:
+                    logger.warning("PUBSUB_TOPIC not configured, job created but not queued")
+                    observability.create_event(
+                        name="analysis_job_not_queued",
+                        input={"job_id": str(job_id)},
+                        status_message="PUBSUB_TOPIC not configured",
+                    )
+
+                response = AnalyzeResponse(
+                    job_id=str(job_id),
+                    message="Analysis started. Check job status for results.",
+                )
+                span.update(output=response.model_dump())
+                return response
+            except HTTPException as e:
+                logger.error("Error triggering analysis: %s", e.detail)
+                span.update(status_message=str(e.detail))
+                raise
+            except Exception as e:
+                logger.error("Error triggering analysis: %s", e)
+                span.update(status_message=str(e))
+                raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/jobs/{job_id}")
@@ -462,6 +621,7 @@ async def get_job_status(job_id: str, clerk_user_id: str = Depends(get_current_u
             raise HTTPException(status_code=404, detail="Job not found")
         if job.get("clerk_user_id") != clerk_user_id:
             raise HTTPException(status_code=403, detail="Not authorized")
+        job["progress"] = derive_job_progress(job)
         return job
     except HTTPException:
         raise
@@ -476,6 +636,8 @@ async def list_jobs(clerk_user_id: str = Depends(get_current_user_id)):
     try:
         user_jobs = db.jobs.find_by_user(clerk_user_id, limit=100)
         user_jobs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        for job in user_jobs:
+            job["progress"] = derive_job_progress(job)
         return {"jobs": user_jobs}
     except Exception as e:
         logger.error("Error listing jobs: %s", e)

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Database package for Alex Financial Planner with PostgreSQL"
 requires-python = ">=3.12"
 dependencies = [
+    "langfuse==3.3.4",
     "pydantic>=2.11.7",
     "python-dotenv>=1.1.1",
     "sqlalchemy>=2.0.43",

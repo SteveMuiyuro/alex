@@ -30,6 +30,7 @@ from src import Database
 from templates import RETIREMENT_INSTRUCTIONS
 from agent import create_agent
 from observability import observe
+from src.job_progress import mark_job_progress
 from src.openai_tracing import traced_agent_execution
 
 logger = logging.getLogger()
@@ -128,7 +129,7 @@ async def run_retirement_agent(job_id: str, portfolio_data: Dict[str, Any]) -> D
         trace_recorder.record_output(response_payload)
         return response_payload
 
-def lambda_handler(event, context):
+async def handle_retirement_event(event):
     """
     Lambda handler expecting job_id in event.
 
@@ -138,7 +139,6 @@ def lambda_handler(event, context):
         "portfolio_data": {...}  # Optional, will load from DB if not provided
     }
     """
-    # Wrap entire handler with observability context
     with observe() as observability:
         try:
             logger.info(f"Retirement Lambda invoked with event: {json.dumps(event)[:500]}")
@@ -168,7 +168,8 @@ def lambda_handler(event, context):
                     if job:
                         if observability:
                             observability.create_event(
-                                name="Retirement Started!", status_message="OK"
+                                name="retirement_portfolio_data_load_started",
+                                status_message="Retirement loading portfolio data from the database",
                             )
                         
                         # portfolio_data = job.get('request_payload', {}).get('portfolio_data', {})
@@ -220,8 +221,28 @@ def lambda_handler(event, context):
 
             logger.info(f"Retirement: Processing job {job_id}")
 
-            # Run the agent
-            result = asyncio.run(run_retirement_agent(job_id, portfolio_data))
+            with observability.start_as_current_span(
+                name="retirement_handler",
+                input={"job_id": job_id, "account_count": len(portfolio_data.get("accounts", []))},
+                metadata={"service": "retirement"},
+            ) as span:
+                span.update_trace(session_id=str(job_id))
+                mark_job_progress(
+                    db,
+                    job_id,
+                    "running_retirement",
+                    message="Retirement Planner is calculating your outlook.",
+                )
+
+                result = await run_retirement_agent(job_id, portfolio_data)
+                mark_job_progress(
+                    db,
+                    job_id,
+                    "running_retirement",
+                    message="Retirement analysis complete.",
+                    metadata={"retirement_ready": True},
+                )
+                span.update(output=result)
 
             logger.info(f"Retirement completed for job {job_id}")
 
@@ -239,6 +260,11 @@ def lambda_handler(event, context):
                     'error': str(e)
                 })
             }
+
+
+def lambda_handler(event, context):
+    """Synchronous compatibility wrapper for Lambda-style invocations."""
+    return asyncio.run(handle_retirement_event(event))
 
 # For local testing
 if __name__ == "__main__":

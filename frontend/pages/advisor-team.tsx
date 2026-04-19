@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@clerk/nextjs';
 import Layout from '../components/Layout';
+import AnalysisProgressCard from '../components/AnalysisProgressCard';
 import { API_URL } from '../lib/config';
 import { emitAnalysisCompleted, emitAnalysisFailed, emitAnalysisStarted } from '../lib/events';
 import Head from 'next/head';
@@ -21,13 +22,54 @@ interface Job {
   created_at: string;
   status: string;
   job_type: string;
+  error_message?: string;
+  progress?: {
+    percent: number;
+    stage_key: string;
+    message: string;
+    active_agents: string[];
+    payloads_completed?: {
+      report: boolean;
+      charts: boolean;
+      retirement: boolean;
+    };
+  };
 }
 
-interface AnalysisProgress {
-  stage: 'idle' | 'starting' | 'planner' | 'parallel' | 'completing' | 'complete' | 'error';
+interface AnalysisProgressState {
+  stage_key: string;
+  percent: number;
   message: string;
   activeAgents: string[];
-  error?: string;
+  payloads_completed?: {
+    report: boolean;
+    charts: boolean;
+    retirement: boolean;
+  };
+}
+
+function getAnimatedAgents(progress: AnalysisProgressState): string[] {
+  const specialistAgents = ['Portfolio Analyst', 'Chart Specialist', 'Retirement Planner'];
+
+  switch (progress.stage_key) {
+    case 'queued':
+      return ['Financial Planner'];
+    case 'planner_started':
+    case 'tagging_instruments':
+    case 'refreshing_market_data':
+    case 'preparing_portfolio_context':
+      return ['Financial Planner'];
+    case 'running_reporter':
+    case 'running_charter':
+    case 'running_retirement':
+    case 'finalizing':
+      return specialistAgents;
+    case 'completed':
+    case 'failed':
+      return [];
+    default:
+      return progress.activeAgents;
+  }
 }
 
 const agents: Agent[] = [
@@ -71,12 +113,20 @@ export default function AdvisorTeam() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
-  const [progress, setProgress] = useState<AnalysisProgress>({
-    stage: 'idle',
+  const [progress, setProgress] = useState<AnalysisProgressState>({
+    stage_key: 'queued',
+    percent: 0,
     message: '',
-    activeAgents: []
+    activeAgents: [],
+    payloads_completed: {
+      report: false,
+      charts: false,
+      retirement: false,
+    },
   });
-  const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const hasAutoStartedRef = useRef(false);
 
   useEffect(() => {
     fetchJobs();
@@ -84,10 +134,29 @@ export default function AdvisorTeam() {
   }, []);
 
   useEffect(() => {
-    const checkJobStatusLocal = async (jobId: string) => {
+    if (!router.isReady || hasAutoStartedRef.current || isAnalyzing) {
+      return;
+    }
+
+    const autoStart = router.query.autostart;
+    if (autoStart !== '1') {
+      return;
+    }
+
+    hasAutoStartedRef.current = true;
+    void startAnalysis();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.autostart, isAnalyzing]);
+
+  useEffect(() => {
+    if (!currentJobId) {
+      return;
+    }
+
+    const checkJobStatusLocal = async () => {
       try {
         const token = await getToken();
-        const response = await fetch(`${API_URL}/api/jobs/${jobId}`, {
+        const response = await fetch(`${API_URL}/api/jobs/${currentJobId}`, {
           headers: {
             'Authorization': `Bearer ${token}`
           }
@@ -95,43 +164,42 @@ export default function AdvisorTeam() {
 
         if (response.ok) {
           const job = await response.json();
+          if (job.progress) {
+            setProgress({
+              stage_key: job.progress.stage_key,
+              percent: job.progress.percent,
+              message: job.progress.message,
+              activeAgents: job.progress.active_agents || [],
+              payloads_completed: job.progress.payloads_completed,
+            });
+          }
 
           if (job.status === 'completed') {
-            setProgress({
-              stage: 'complete',
-              message: 'Analysis complete!',
-              activeAgents: []
-            });
-
-            if (pollInterval) {
-              clearInterval(pollInterval);
-              setPollInterval(null);
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
             }
 
             // Emit completion event so other components can refresh
-            emitAnalysisCompleted(jobId);
+            emitAnalysisCompleted(currentJobId);
 
             // Also refresh our own jobs list
             fetchJobs();
+            setIsAnalyzing(false);
 
             setTimeout(() => {
-              router.push(analysisRoute(jobId));
+              router.push(analysisRoute(currentJobId));
             }, 1500);
           } else if (job.status === 'failed') {
-            setProgress({
-              stage: 'error',
-              message: 'Analysis failed',
-              activeAgents: [],
-              error: job.error || 'Analysis encountered an error'
-            });
+            setAnalysisError(job.error_message || 'Analysis encountered an error');
 
-            if (pollInterval) {
-              clearInterval(pollInterval);
-              setPollInterval(null);
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
             }
 
             // Emit failure event
-            emitAnalysisFailed(jobId, job.error);
+            emitAnalysisFailed(currentJobId, job.error_message);
 
             setIsAnalyzing(false);
             setCurrentJobId(null);
@@ -142,21 +210,22 @@ export default function AdvisorTeam() {
       }
     };
 
-    if (currentJobId && !pollInterval) {
-      const interval = setInterval(() => {
-        checkJobStatusLocal(currentJobId);
+    void checkJobStatusLocal();
+
+    if (!pollIntervalRef.current) {
+      pollIntervalRef.current = setInterval(() => {
+        void checkJobStatusLocal();
       }, 2000);
-      setPollInterval(interval);
     }
 
     return () => {
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        setPollInterval(null);
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentJobId, pollInterval, router]);
+  }, [currentJobId, router, getToken]);
 
   const fetchJobs = async () => {
     try {
@@ -178,10 +247,17 @@ export default function AdvisorTeam() {
 
   const startAnalysis = async () => {
     setIsAnalyzing(true);
+    setAnalysisError(null);
     setProgress({
-      stage: 'starting',
-      message: 'Initializing analysis...',
-      activeAgents: []
+      stage_key: 'planner_started',
+      percent: 8,
+      message: 'Financial Planner is picking up your analysis request...',
+      activeAgents: ['Financial Planner'],
+      payloads_completed: {
+        report: false,
+        charts: false,
+        retirement: false,
+      },
     });
 
     try {
@@ -206,29 +282,22 @@ export default function AdvisorTeam() {
         emitAnalysisStarted(data.job_id);
 
         setProgress({
-          stage: 'planner',
-          message: 'Financial Planner coordinating analysis...',
-          activeAgents: ['Financial Planner']
+          stage_key: 'planner_started',
+          percent: 10,
+          message: 'Financial Planner is coordinating your analysis.',
+          activeAgents: ['Financial Planner'],
+          payloads_completed: {
+            report: false,
+            charts: false,
+            retirement: false,
+          },
         });
-
-        setTimeout(() => {
-          setProgress({
-            stage: 'parallel',
-            message: 'Agents working in parallel...',
-            activeAgents: ['Portfolio Analyst', 'Chart Specialist', 'Retirement Planner']
-          });
-        }, 5000);
       } else {
         throw new Error('Failed to start analysis');
       }
     } catch (error) {
       console.error('Error starting analysis:', error);
-      setProgress({
-        stage: 'error',
-        message: 'Failed to start analysis',
-        activeAgents: [],
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
+      setAnalysisError(error instanceof Error ? error.message : 'Unknown error');
       setIsAnalyzing(false);
       setCurrentJobId(null);
     }
@@ -259,7 +328,7 @@ export default function AdvisorTeam() {
   };
 
   const isAgentActive = (agentName: string) => {
-    return progress.activeAgents.includes(agentName);
+    return getAnimatedAgents(progress).includes(agentName);
   };
 
   return (
@@ -282,7 +351,7 @@ export default function AdvisorTeam() {
               <div
                 key={agent.name}
                 className={`bg-white rounded-lg shadow-lg p-6 relative overflow-hidden transition-all duration-300 ${
-                  isAgentActive(agent.name) ? 'ring-4 ring-ai-accent ring-opacity-50' : ''
+                  isAgentActive(agent.name) ? 'ring-4 ring-ai-accent ring-opacity-50 animate-glow-pulse' : ''
                 }`}
               >
                 {isAgentActive(agent.name) && (
@@ -323,55 +392,45 @@ export default function AdvisorTeam() {
             </div>
 
             {isAnalyzing && (
-              <div className="mb-8 p-6 bg-gradient-to-r from-ai-accent/10 to-primary/10 rounded-lg border border-ai-accent/20">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-dark">Analysis Progress</h3>
-                  {progress.stage !== 'error' && progress.stage !== 'complete' && (
-                    <div className="flex space-x-2">
-                      <div className="w-3 h-3 bg-ai-accent rounded-full animate-strong-pulse" />
-                      <div className="w-3 h-3 bg-ai-accent rounded-full animate-strong-pulse" style={{ animationDelay: '0.5s' }} />
-                      <div className="w-3 h-3 bg-ai-accent rounded-full animate-strong-pulse" style={{ animationDelay: '1s' }} />
-                    </div>
-                  )}
-                </div>
-
-                <p className={`text-sm mb-4 ${
-                  progress.stage === 'error' ? 'text-red-600' : 'text-gray-600'
-                }`}>
-                  {progress.message}
-                </p>
-
-                {progress.stage === 'error' && progress.error && (
-                  <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                    <p className="text-sm text-red-800">{progress.error}</p>
+              <>
+                <AnalysisProgressCard
+                  progress={{
+                    percent: progress.percent,
+                    stage_key: progress.stage_key,
+                    message: progress.message,
+                    active_agents: progress.activeAgents,
+                    payloads_completed: progress.payloads_completed,
+                  }}
+                  isError={Boolean(analysisError)}
+                  errorMessage={analysisError || undefined}
+                />
+                {analysisError && (
+                  <div className="mb-8 rounded-lg border border-red-200 bg-red-50 p-4">
+                    <p className="text-sm text-red-800">{analysisError}</p>
                     <button
                       onClick={() => {
                         setIsAnalyzing(false);
                         setCurrentJobId(null);
-                        setProgress({ stage: 'idle', message: '', activeAgents: [] });
+                        setAnalysisError(null);
+                        setProgress({
+                          stage_key: 'queued',
+                          percent: 0,
+                          message: '',
+                          activeAgents: [],
+                          payloads_completed: {
+                            report: false,
+                            charts: false,
+                            retirement: false,
+                          },
+                        });
                       }}
-                      className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-semibold"
+                      className="mt-3 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
                     >
                       Try Again
                     </button>
                   </div>
                 )}
-
-                {progress.stage !== 'idle' && progress.stage !== 'error' && (
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                      className="bg-ai-accent h-2 rounded-full transition-all duration-1000"
-                      style={{
-                        width: progress.stage === 'starting' ? '10%' :
-                               progress.stage === 'planner' ? '30%' :
-                               progress.stage === 'parallel' ? '70%' :
-                               progress.stage === 'completing' ? '90%' :
-                               '100%'
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
+              </>
             )}
 
             <div>

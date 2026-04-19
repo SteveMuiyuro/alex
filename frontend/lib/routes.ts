@@ -12,6 +12,14 @@ export const CLERK_ACCOUNTS_URL = withSiteUrl(ACCOUNTS_ROUTE);
 export const CLERK_ADVISOR_TEAM_URL = withSiteUrl(ADVISOR_TEAM_ROUTE);
 export const CLERK_ANALYSIS_URL = withSiteUrl(ANALYSIS_ROUTE);
 
+export function advisorTeamRoute(autoStart = false): string {
+  if (!autoStart) {
+    return ADVISOR_TEAM_ROUTE;
+  }
+
+  return `${ADVISOR_TEAM_ROUTE}?autostart=1`;
+}
+
 export function analysisRoute(jobId?: string): string {
   if (!jobId) {
     return ANALYSIS_ROUTE;

@@ -46,6 +46,30 @@ interface Instrument {
   sector_allocation?: Record<string, number>;
 }
 
+interface MarketQuote {
+  symbol: string;
+  price: number;
+  change: number;
+  change_percent: number;
+}
+
+interface MarketNewsItem {
+  id?: string;
+  title: string;
+  publisher?: string;
+  published_utc?: string;
+  article_url?: string;
+  tickers?: string[];
+}
+
+interface MarketSnapshotResponse {
+  quotes: MarketQuote[];
+  news: MarketNewsItem[];
+  delayed: boolean;
+  plan: string;
+  as_of?: string | null;
+}
+
 export default function Dashboard() {
   const { user, isLoaded: userLoaded } = useUser();
   const { getToken } = useAuth();
@@ -57,6 +81,8 @@ export default function Dashboard() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastAnalysisDate, setLastAnalysisDate] = useState<string | null>(null);
+  const [marketSnapshot, setMarketSnapshot] = useState<MarketSnapshotResponse | null>(null);
+  const [marketLoading, setMarketLoading] = useState(true);
 
   // Form state for editable fields - start empty to avoid flicker
   const [displayName, setDisplayName] = useState("");
@@ -209,11 +235,23 @@ export default function Dashboard() {
           }
         }
 
+        const marketResponse = await fetch(`${API_URL}/api/market-snapshot`, {
+          headers: {
+            "Authorization": `Bearer ${token}`,
+          },
+        });
+
+        if (marketResponse.ok) {
+          const marketData = await marketResponse.json();
+          setMarketSnapshot(marketData);
+        }
+
       } catch (err) {
         console.error("Error loading data:", err);
         setError(err instanceof Error ? err.message : "Failed to load data");
       } finally {
         setLoading(false);
+        setMarketLoading(false);
       }
     }
 
@@ -380,6 +418,15 @@ export default function Dashboard() {
     }));
 
   const COLORS = ['#209DD7', '#753991', '#FFB707', '#062147', '#10B981'];
+  const formatMarketTimestamp = (timestamp?: string | null) => {
+    if (!timestamp) return 'Unavailable';
+    return new Date(timestamp).toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
 
   return (
     <>
@@ -459,6 +506,122 @@ export default function Dashboard() {
         </div>
 
         {/* User Settings Section */}
+        <div className="mb-8 grid grid-cols-1 gap-8 lg:grid-cols-[1.5fr_1fr]">
+          <div className="rounded-lg bg-white p-6 shadow">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold text-dark">Delayed Market Snapshot</h2>
+                <p className="text-sm text-gray-500">
+                  Free Polygon plan data is delayed and intended for directional context, not live trading decisions.
+                </p>
+              </div>
+              <div className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-gray-600">
+                {marketSnapshot?.plan || 'free'} plan
+              </div>
+            </div>
+
+            {marketLoading ? (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <div key={index} className="rounded-lg border border-gray-200 p-4">
+                    <Skeleton className="mb-3 h-4 w-16" />
+                    <Skeleton className="mb-2 h-7 w-28" />
+                    <Skeleton className="h-4 w-20" />
+                  </div>
+                ))}
+              </div>
+            ) : marketSnapshot?.quotes?.length ? (
+              <>
+                <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {marketSnapshot.quotes.map((quote) => {
+                    const isUp = quote.change >= 0;
+                    return (
+                      <div key={quote.symbol} className="rounded-lg border border-gray-200 p-4">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="text-sm font-semibold text-dark">{quote.symbol}</span>
+                          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                            isUp ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+                          }`}>
+                            {isUp ? 'Up' : 'Down'}
+                          </span>
+                        </div>
+                        <p className="text-2xl font-bold text-dark">${quote.price.toFixed(2)}</p>
+                        <p className={`mt-1 text-sm font-medium ${isUp ? 'text-green-600' : 'text-red-600'}`}>
+                          {isUp ? '+' : ''}{quote.change.toFixed(2)} ({isUp ? '+' : ''}{quote.change_percent.toFixed(2)}%)
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-gray-500">
+                  Snapshot updated {formatMarketTimestamp(marketSnapshot.as_of)}.
+                </p>
+              </>
+            ) : (
+              <div className="rounded-lg border border-dashed border-gray-300 p-6 text-sm text-gray-500">
+                Delayed market snapshot is currently unavailable.
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg bg-white p-6 shadow">
+            <div className="mb-4">
+              <h2 className="text-xl font-semibold text-dark">Latest Market News</h2>
+              <p className="text-sm text-gray-500">
+                Recent market news from Polygon, when available.
+              </p>
+            </div>
+
+            {marketLoading ? (
+              <div className="space-y-4">
+                {Array.from({ length: 3 }).map((_, index) => (
+                  <div key={index}>
+                    <Skeleton className="mb-2 h-4 w-full" />
+                    <Skeleton className="h-3 w-2/3" />
+                  </div>
+                ))}
+              </div>
+            ) : marketSnapshot?.news?.length ? (
+              <div className="space-y-4">
+                {marketSnapshot.news.map((item) => {
+                  const content = (
+                    <>
+                      <p className="mb-2 text-sm font-semibold text-dark">{item.title}</p>
+                      <div className="text-xs text-gray-500">
+                        {(item.publisher || 'Polygon News')} • {formatMarketTimestamp(item.published_utc)}
+                      </div>
+                    </>
+                  );
+
+                  if (!item.article_url) {
+                    return (
+                      <div key={item.id || item.title} className="rounded-lg border border-gray-200 p-4">
+                        {content}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <a
+                      key={item.id || item.title}
+                      href={item.article_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-lg border border-gray-200 p-4 transition-colors hover:border-primary hover:bg-blue-50"
+                    >
+                      {content}
+                    </a>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-gray-300 p-6 text-sm text-gray-500">
+                No news items are currently available from Polygon for this environment.
+              </div>
+            )}
+          </div>
+        </div>
+
         <div className="bg-white rounded-lg shadow p-6 mb-8">
           <h2 className="text-xl font-semibold text-dark mb-6">User Settings</h2>
 

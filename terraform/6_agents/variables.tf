@@ -47,6 +47,36 @@ variable "openai_api_secret_name" {
   type        = string
 }
 
+variable "langfuse_public_key_secret_name" {
+  description = "Optional Secret Manager secret name for the Langfuse public key"
+  type        = string
+  default     = ""
+}
+
+variable "langfuse_secret_key_secret_name" {
+  description = "Optional Secret Manager secret name for the Langfuse secret key"
+  type        = string
+  default     = ""
+}
+
+variable "langfuse_base_url" {
+  description = "Optional Langfuse base URL/host"
+  type        = string
+  default     = ""
+}
+
+variable "polygon_api_key_secret_name" {
+  description = "Optional Secret Manager secret name for the Polygon API key"
+  type        = string
+  default     = ""
+}
+
+variable "polygon_plan" {
+  description = "Polygon plan type used by the planner service"
+  type        = string
+  default     = "free"
+}
+
 variable "default_agent_image" {
   description = "Default container image for agents"
   type        = string

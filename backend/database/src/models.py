@@ -265,6 +265,29 @@ class Jobs(BaseModel):
         """Update job with Planner's final summary"""
         data = {'summary_payload': summary_payload}
         return self.db.update(self.table_name, data, "id = CAST(:id AS UUID)", {'id': job_id})
+
+    def merge_summary(self, job_id: str, summary_updates: Dict) -> int:
+        """Deep-merge summary payload updates for incremental job progress/state."""
+        job = self.find_by_id(job_id)
+        if not job:
+            return 0
+
+        current_summary = job.get("summary_payload") or {}
+        merged_summary = self._deep_merge_dicts(current_summary, summary_updates)
+        return self.update_summary(job_id, merged_summary)
+
+    def _deep_merge_dicts(self, current: Dict, updates: Dict) -> Dict:
+        """Recursively merge nested dictionaries."""
+        merged = dict(current)
+
+        for key, value in updates.items():
+            current_value = merged.get(key)
+            if isinstance(current_value, dict) and isinstance(value, dict):
+                merged[key] = self._deep_merge_dicts(current_value, value)
+            else:
+                merged[key] = value
+
+        return merged
     
     def find_by_user(self, clerk_user_id: str, status: str = None, 
                     limit: int = 20) -> List[Dict]:

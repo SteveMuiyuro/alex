@@ -24,6 +24,7 @@ from src import Database
 from templates import CHARTER_INSTRUCTIONS
 from agent import create_agent
 from observability import observe
+from src.job_progress import mark_job_progress
 from src.openai_tracing import traced_agent_execution
 
 logger = logging.getLogger()
@@ -131,7 +132,7 @@ async def run_charter_agent(job_id: str, portfolio_data: Dict[str, Any], db=None
         trace_recorder.record_output(response_payload)
         return response_payload
 
-def lambda_handler(event, context):
+async def handle_charter_event(event):
     """
     Lambda handler expecting job_id and portfolio_data in event.
 
@@ -141,8 +142,7 @@ def lambda_handler(event, context):
         "portfolio_data": {...}
     }
     """
-    # Wrap entire handler with observability context
-    with observe():
+    with observe() as observability:
         try:
             logger.info(f"Charter Lambda invoked with event keys: {list(event.keys()) if isinstance(event, dict) else 'not a dict'}")
 
@@ -215,8 +215,28 @@ def lambda_handler(event, context):
 
             logger.info(f"Charter: Processing job {job_id}")
 
-            # Run the agent
-            result = asyncio.run(run_charter_agent(job_id, portfolio_data, db))
+            with observability.start_as_current_span(
+                name="charter_handler",
+                input={"job_id": job_id, "account_count": len(portfolio_data.get("accounts", []))},
+                metadata={"service": "charter"},
+            ) as span:
+                span.update_trace(session_id=str(job_id))
+                mark_job_progress(
+                    db,
+                    job_id,
+                    "running_charter",
+                    message="Chart Specialist is building portfolio charts.",
+                )
+
+                result = await run_charter_agent(job_id, portfolio_data, db)
+                mark_job_progress(
+                    db,
+                    job_id,
+                    "running_charter",
+                    message="Portfolio charts complete.",
+                    metadata={"charts_ready": True},
+                )
+                span.update(output=result)
 
             logger.info(f"Charter completed for job {job_id}: {result}")
 
@@ -234,6 +254,11 @@ def lambda_handler(event, context):
                     'error': str(e)
                 })
             }
+
+
+def lambda_handler(event, context):
+    """Synchronous compatibility wrapper for Lambda-style invocations."""
+    return asyncio.run(handle_charter_event(event))
 
 # For local testing
 if __name__ == "__main__":

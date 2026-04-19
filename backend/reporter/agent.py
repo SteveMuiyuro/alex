@@ -7,6 +7,7 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from agents import function_tool, RunContextWrapper
 from agents.extensions.models.litellm_model import LitellmModel
@@ -152,9 +153,12 @@ def create_agent(job_id: str, portfolio_data: Dict[str, Any], user_data: Dict[st
 
     # Format portfolio for analysis
     portfolio_summary = format_portfolio_for_analysis(portfolio_data, user_data)
+    current_utc_date = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
     # Create task
     task = f"""Analyze this investment portfolio and write a comprehensive report.
+
+Current date (UTC): {current_utc_date}
 
 {portfolio_summary}
 
@@ -173,6 +177,7 @@ The report should include:
 - Market Context (from insights)
 
 Provide your complete analysis as the final output in clear markdown format.
-Make the report informative yet accessible to a retail investor."""
+Make the report informative yet accessible to a retail investor.
+If you mention today's date or an as-of date anywhere in the report, use exactly {current_utc_date}."""
 
     return model, tools, task, context

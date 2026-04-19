@@ -12,7 +12,7 @@ import httpx
 
 from agents import function_span, function_tool, RunContextWrapper
 from agents.extensions.models.litellm_model import LitellmModel
-from src.openai_tracing import dump_trace_json
+from src.openai_tracing import dump_trace_json, get_workflow_observer
 
 logger = logging.getLogger()
 
@@ -41,24 +41,36 @@ async def invoke_lambda_agent(
         return {"success": True, "message": f"[Mock] {agent_name} completed", "mock": True}
 
     span_input = {"agent_name": agent_name, "endpoint": endpoint, "payload": payload}
-    with function_span(name=f"invoke_{agent_name.lower()}", input=dump_trace_json(span_input)) as span:
-        try:
-            logger.info(f"Invoking {agent_name} service: {endpoint}")
-            async with httpx.AsyncClient(timeout=120) as client:
-                response = await client.post(endpoint, json=payload)
-                response.raise_for_status()
-                result = response.json()
+    workflow_observer = get_workflow_observer()
+    with workflow_observer.start_as_current_span(
+        name=f"workflow_invoke_{agent_name.lower()}",
+        input=span_input,
+        metadata={"service": "planner", "target_agent": agent_name},
+    ) as workflow_span:
+        job_id = payload.get("job_id")
+        if job_id:
+            workflow_span.update_trace(session_id=str(job_id))
 
-            span.span_data.output = dump_trace_json(result)
-            logger.info(f"{agent_name} completed successfully")
-            return result
+        with function_span(name=f"invoke_{agent_name.lower()}", input=dump_trace_json(span_input)) as span:
+            try:
+                logger.info(f"Invoking {agent_name} service: {endpoint}")
+                async with httpx.AsyncClient(timeout=120) as client:
+                    response = await client.post(endpoint, json=payload)
+                    response.raise_for_status()
+                    result = response.json()
 
-        except Exception as e:
-            error_payload = {"type": type(e).__name__, "message": str(e)}
-            span.span_data.output = dump_trace_json({"error": error_payload})
-            span.set_error({"message": str(e), "data": error_payload})
-            logger.error(f"Error invoking {agent_name}: {e}")
-            return {"error": str(e)}
+                span.span_data.output = dump_trace_json(result)
+                workflow_span.update(output=result)
+                logger.info(f"{agent_name} completed successfully")
+                return result
+
+            except Exception as e:
+                error_payload = {"type": type(e).__name__, "message": str(e)}
+                span.span_data.output = dump_trace_json({"error": error_payload})
+                span.set_error(str(e))
+                workflow_span.update(status_message=str(e), output={"error": error_payload})
+                logger.error(f"Error invoking {agent_name}: {e}")
+                return {"error": str(e)}
 
 
 def handle_missing_instruments(job_id: str, db) -> None:
@@ -66,6 +78,7 @@ def handle_missing_instruments(job_id: str, db) -> None:
     Check for and tag any instruments missing allocation data.
     This is done automatically before the agent runs.
     """
+    workflow_observer = get_workflow_observer()
     logger.info("Planner: Checking for instruments missing allocation data...")
 
     # Get job and portfolio data
@@ -102,16 +115,31 @@ def handle_missing_instruments(job_id: str, db) -> None:
 
         try:
             payload = {"job_id": job_id, "instruments": missing}
-            with function_span(name="invoke_tagger", input=dump_trace_json(payload)) as span:
-                with httpx.Client(timeout=120) as client:
-                    response = client.post(TAGGER_ENDPOINT, json=payload)
-                    response.raise_for_status()
-                    span.span_data.output = dump_trace_json({"status_code": response.status_code})
+            with workflow_observer.start_as_current_span(
+                name="workflow_invoke_tagger_preprocessing",
+                input=payload,
+                metadata={"service": "planner", "target_agent": "tagger", "reason": "missing_instruments"},
+            ) as workflow_span:
+                workflow_span.update_trace(session_id=str(job_id))
+                with function_span(name="invoke_tagger", input=dump_trace_json(payload)) as span:
+                    with httpx.Client(timeout=120) as client:
+                        response = client.post(TAGGER_ENDPOINT, json=payload)
+                        response.raise_for_status()
+                        result = {"status_code": response.status_code, "tagged_symbols": [item["symbol"] for item in missing]}
+                        span.span_data.output = dump_trace_json(result)
+                        workflow_span.update(output=result)
             logger.info(
                 f"Planner: InstrumentTagger completed - Tagged {len(missing)} instruments"
             )
 
         except Exception as e:
+            with workflow_observer.start_as_current_span(
+                name="workflow_invoke_tagger_preprocessing_error",
+                input={"job_id": job_id, "error": str(e)},
+                metadata={"service": "planner", "target_agent": "tagger"},
+            ) as workflow_span:
+                workflow_span.update_trace(session_id=str(job_id))
+                workflow_span.update(status_message=str(e), output={"error": str(e)})
             logger.error(f"Planner: Error tagging instruments: {e}")
     else:
         logger.info("Planner: All instruments have allocation data")

@@ -29,6 +29,7 @@ from src import Database
 from templates import REPORTER_INSTRUCTIONS
 from agent import create_agent, ReporterContext
 from observability import observe
+from src.job_progress import mark_job_progress
 from src.openai_tracing import traced_agent_execution
 
 logger = logging.getLogger()
@@ -76,13 +77,21 @@ async def run_reporter_agent(
         response = result.final_output
 
         if observability:
-            with observability.start_as_current_span(name="judge") as span:
+            with observability.start_as_current_span(name="reporter_judge") as span:
                 evaluation = await evaluate(REPORTER_INSTRUCTIONS, task, response)
                 score = evaluation.score / 100
                 comment = evaluation.feedback
-                span.score(name="Judge", value=score, data_type="NUMERIC", comment=comment)
+                span.score(
+                    name="reporter_judge_score",
+                    value=score,
+                    data_type="NUMERIC",
+                    comment=comment,
+                )
                 observation = f"Score: {score} - Feedback: {comment}"
-                observability.create_event(name="Judge Event", status_message=observation)
+                observability.create_event(
+                    name="reporter_judge_feedback_recorded",
+                    status_message=observation,
+                )
                 if score < GUARD_AGAINST_SCORE:
                     logger.error(f"Reporter score is too low: {score}")
                     response = "I'm sorry, I'm not able to generate a report for you. Please try again later."
@@ -110,7 +119,7 @@ async def run_reporter_agent(
         return response_payload
 
 
-def lambda_handler(event, context):
+async def handle_reporter_event(event):
     """
     Lambda handler expecting job_id, portfolio_data, and user_data in event.
 
@@ -121,7 +130,6 @@ def lambda_handler(event, context):
         "user_data": {...}
     }
     """
-    # Wrap entire handler with observability context
     with observe() as observability:
         try:
             logger.info(f"Reporter Lambda invoked with event: {json.dumps(event)[:500]}")
@@ -147,7 +155,8 @@ def lambda_handler(event, context):
 
                         if observability:
                             observability.create_event(
-                                name="Reporter Started!", status_message="OK"
+                                name="reporter_portfolio_data_load_started",
+                                status_message="Reporter loading portfolio data from the database",
                             )
                         user = db.users.find_by_clerk_id(user_id)
                         accounts = db.accounts.find_by_user(user_id)
@@ -197,7 +206,8 @@ def lambda_handler(event, context):
                         status = f"Job ID: {job_id} Clerk User ID: {job['clerk_user_id']}"
                         if observability:
                             observability.create_event(
-                                name="Reporter about to run", status_message=status
+                                name="reporter_user_data_load_started",
+                                status_message=status,
                             )
                         user = db.users.find_by_clerk_id(job["clerk_user_id"])
                         if user:
@@ -216,10 +226,33 @@ def lambda_handler(event, context):
                     logger.warning(f"Could not load user data: {e}. Using defaults.")
                     user_data = {"years_until_retirement": 30, "target_retirement_income": 80000}
 
-            # Run the agent
-            result = asyncio.run(
-                run_reporter_agent(job_id, portfolio_data, user_data, db, observability)
-            )
+            with observability.start_as_current_span(
+                name="reporter_handler",
+                input={
+                    "job_id": job_id,
+                    "account_count": len(portfolio_data.get("accounts", [])),
+                },
+                metadata={"service": "reporter"},
+            ) as span:
+                span.update_trace(session_id=str(job_id))
+                mark_job_progress(
+                    db,
+                    job_id,
+                    "running_reporter",
+                    message="Portfolio Analyst is writing the report.",
+                )
+
+                result = await run_reporter_agent(
+                    job_id, portfolio_data, user_data, db, observability
+                )
+                mark_job_progress(
+                    db,
+                    job_id,
+                    "running_reporter",
+                    message="Portfolio report complete.",
+                    metadata={"report_ready": True},
+                )
+                span.update(output=result)
 
             logger.info(f"Reporter completed for job {job_id}")
 
@@ -228,6 +261,11 @@ def lambda_handler(event, context):
         except Exception as e:
             logger.error(f"Error in reporter: {e}", exc_info=True)
             return {"statusCode": 500, "body": json.dumps({"success": False, "error": str(e)})}
+
+
+def lambda_handler(event, context):
+    """Synchronous compatibility wrapper for Lambda-style invocations."""
+    return asyncio.run(handle_reporter_event(event))
 
 
 # For local testing

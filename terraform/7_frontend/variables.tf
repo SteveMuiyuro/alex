@@ -63,6 +63,36 @@ variable "vertex_region" {
   default     = "us-east4"
 }
 
+variable "langfuse_public_key_secret_name" {
+  description = "Optional Secret Manager secret name for the Langfuse public key"
+  type        = string
+  default     = ""
+}
+
+variable "langfuse_secret_key_secret_name" {
+  description = "Optional Secret Manager secret name for the Langfuse secret key"
+  type        = string
+  default     = ""
+}
+
+variable "langfuse_base_url" {
+  description = "Optional Langfuse base URL/host"
+  type        = string
+  default     = ""
+}
+
+variable "polygon_api_key_secret_name" {
+  description = "Optional Secret Manager secret name for the Polygon API key"
+  type        = string
+  default     = ""
+}
+
+variable "polygon_plan" {
+  description = "Polygon plan level used by the API dashboard snapshot endpoint"
+  type        = string
+  default     = "free"
+}
+
 variable "create_frontend_load_balancer" {
   description = "Whether to create a global external HTTPS load balancer for the static frontend."
   type        = bool

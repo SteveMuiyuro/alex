@@ -1,12 +1,11 @@
 """Cloud Run HTTP wrapper for the charter service."""
 
-import asyncio
 import json
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from lambda_handler import lambda_handler
+from lambda_handler import handle_charter_event
 
 app = FastAPI(title="Alex Charter Service")
 
@@ -19,7 +18,7 @@ async def health() -> dict[str, str]:
 @app.post("/chart")
 async def chart(request: Request) -> JSONResponse:
     payload = await request.json()
-    result = await asyncio.to_thread(lambda_handler, payload, None)
+    result = await handle_charter_event(payload)
     status_code = result.get("statusCode", 200)
     body = result.get("body", "{}")
     try:

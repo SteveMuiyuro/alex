@@ -9,6 +9,11 @@ db_password              = "CHANGE_ME"
 db_name                  = "alex"
 cloudsql_connection_name = "alex-prod-project:us-central1:alex-db"
 openai_api_secret_name   = "openai-api-key"
+langfuse_public_key_secret_name = ""
+langfuse_secret_key_secret_name = ""
+langfuse_base_url               = "https://us.cloud.langfuse.com"
+polygon_api_key_secret_name     = ""
+polygon_plan                    = "free"
 
 # Optional per-agent images
 agent_images = {

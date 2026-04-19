@@ -28,6 +28,16 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
 }
 
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
 /* Stronger pulsing animation for agent activity */
 @keyframes strong-pulse {
   0%, 100% {

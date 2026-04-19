@@ -7,7 +7,6 @@ import json
 import asyncio
 import base64
 import logging
-import base64
 from typing import Dict, Any
 
 from agents import Agent, Runner
@@ -28,6 +27,7 @@ from templates import ORCHESTRATOR_INSTRUCTIONS
 from agent import create_agent, handle_missing_instruments, load_portfolio_summary
 from market import update_instrument_prices
 from observability import observe
+from src.job_progress import mark_job_progress
 from src.openai_tracing import traced_agent_execution
 
 logger = logging.getLogger()
@@ -45,21 +45,68 @@ app = FastAPI(title="Alex Planner Service", version="1.0.0")
     wait=wait_exponential(multiplier=1, min=4, max=60),
     before_sleep=lambda retry_state: logger.info(f"Planner: Rate limit hit, retrying in {retry_state.next_action.sleep} seconds...")
 )
-async def run_orchestrator(job_id: str) -> None:
+async def run_orchestrator(job_id: str, observability=None) -> None:
     """Run the orchestrator agent to coordinate portfolio analysis."""
     try:
         # Update job status to running
         db.jobs.update_status(job_id, 'running')
-        
+        mark_job_progress(
+            db,
+            job_id,
+            "planner_started",
+            message="Financial Planner is coordinating your analysis.",
+        )
+
+        if observability:
+            observability.create_event(
+                name="planner_job_started",
+                input={"job_id": job_id},
+                status_message="Planner job marked as running",
+            )
+
         # Handle missing instruments first (non-agent pre-processing)
-        await asyncio.to_thread(handle_missing_instruments, job_id, db)
+        mark_job_progress(
+            db,
+            job_id,
+            "tagging_instruments",
+            message="Checking and classifying any missing instrument data.",
+        )
+        with observability.start_as_current_span(
+            name="planner_handle_missing_instruments",
+            input={"job_id": job_id},
+        ) as missing_span:
+            await asyncio.to_thread(handle_missing_instruments, job_id, db)
+            missing_span.update(output={"job_id": job_id, "status": "completed"})
 
         # Update instrument prices after tagging
         logger.info("Planner: Updating instrument prices from market data")
-        await asyncio.to_thread(update_instrument_prices, job_id, db)
+        mark_job_progress(
+            db,
+            job_id,
+            "refreshing_market_data",
+            message="Refreshing delayed market prices from Polygon.",
+        )
+        with observability.start_as_current_span(
+            name="planner_update_instrument_prices",
+            input={"job_id": job_id},
+            metadata={"provider": "polygon"},
+        ) as market_span:
+            await asyncio.to_thread(update_instrument_prices, job_id, db)
+            market_span.update(output={"job_id": job_id, "status": "completed"})
 
         # Load portfolio summary (just statistics, not full data)
-        portfolio_summary = await asyncio.to_thread(load_portfolio_summary, job_id, db)
+        mark_job_progress(
+            db,
+            job_id,
+            "preparing_portfolio_context",
+            message="Preparing portfolio context for the specialist agents.",
+        )
+        with observability.start_as_current_span(
+            name="planner_load_portfolio_summary",
+            input={"job_id": job_id},
+        ) as summary_span:
+            portfolio_summary = await asyncio.to_thread(load_portfolio_summary, job_id, db)
+            summary_span.update(output=portfolio_summary)
         
         # Create agent with tools and context
         model, tools, task, context = create_agent(job_id, portfolio_summary, db)
@@ -92,15 +139,41 @@ async def run_orchestrator(job_id: str) -> None:
             )
             
             # Mark job as completed after all agents finish
+            mark_job_progress(
+                db,
+                job_id,
+                "finalizing",
+                message="Finalizing analysis results from all specialists.",
+            )
             db.jobs.update_status(job_id, "completed")
+            mark_job_progress(db, job_id, "completed")
+            if observability:
+                observability.create_event(
+                    name="planner_job_completed",
+                    input={"job_id": job_id},
+                    status_message="Planner job completed successfully",
+                )
             logger.info(f"Planner: Job {job_id} completed successfully")
             
     except Exception as e:
         logger.error(f"Planner: Error in orchestration: {e}", exc_info=True)
         db.jobs.update_status(job_id, 'failed', error_message=str(e))
+        mark_job_progress(
+            db,
+            job_id,
+            "failed",
+            message="Analysis failed before completion.",
+            metadata={"error": str(e)},
+        )
+        if observability:
+            observability.create_event(
+                name="planner_job_failed",
+                input={"job_id": job_id},
+                status_message=str(e),
+            )
         raise
 
-def lambda_handler(event, context):
+async def handle_planner_event(event):
     """
     Runtime handler for queue-triggered orchestration.
 
@@ -113,8 +186,7 @@ def lambda_handler(event, context):
         ]
     }
     """
-    # Wrap entire handler with observability context
-    with observe():
+    with observe() as observability:
         try:
             logger.info(f"Planner runtime invoked with event: {json.dumps(event)[:500]}")
 
@@ -147,9 +219,25 @@ def lambda_handler(event, context):
                 }
 
             logger.info(f"Planner: Starting orchestration for job {job_id}")
+            with observability.start_as_current_span(
+                name="planner_handler",
+                input={"job_id": job_id, "event": event},
+                metadata={"service": "planner"},
+            ) as workflow_span:
+                workflow_span.update_trace(
+                    name="portfolio_analysis_job",
+                    session_id=str(job_id),
+                    metadata={"service": "planner"},
+                )
+                observability.create_event(
+                    name="planner_message_received",
+                    input={"job_id": job_id},
+                    status_message="Planner received a job",
+                )
 
-            # Run the orchestrator
-            asyncio.run(run_orchestrator(job_id))
+                # Run the orchestrator
+                await run_orchestrator(job_id, observability)
+                workflow_span.update(output={"job_id": job_id, "status": "completed"})
 
             return {
                 'statusCode': 200,
@@ -168,6 +256,11 @@ def lambda_handler(event, context):
                     'error': str(e)
                 })
             }
+
+
+def lambda_handler(event, context):
+    """Synchronous compatibility wrapper for Lambda-style invocations."""
+    return asyncio.run(handle_planner_event(event))
 
 
 def _decode_pubsub_push(envelope: Dict[str, Any]) -> Dict[str, Any]:
@@ -198,7 +291,7 @@ async def pubsub_push_handler(envelope: Dict[str, Any]):
     """
     try:
         payload = _decode_pubsub_push(envelope)
-        result = lambda_handler(payload, None)
+        result = await handle_planner_event(payload)
         if result.get("statusCode", 500) >= 400:
             raise HTTPException(status_code=500, detail=result.get("body", "Planner failed"))
         return {"ok": True}
@@ -212,7 +305,7 @@ async def pubsub_push_handler(envelope: Dict[str, Any]):
 @app.post("/run")
 async def run_handler(payload: Dict[str, Any]):
     """Direct HTTP trigger for planner; useful for smoke tests."""
-    result = lambda_handler(payload, None)
+    result = await handle_planner_event(payload)
     status_code = result.get("statusCode", 500)
     body = result.get("body")
     parsed_body = json.loads(body) if isinstance(body, str) else body

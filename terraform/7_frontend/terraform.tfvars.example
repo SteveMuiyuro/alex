@@ -13,6 +13,11 @@ clerk_jwks_url = "https://your-app.clerk.accounts.dev/.well-known/jwks.json"
 
 vertex_model  = "gemini-2.5-flash"
 vertex_region = "us-east4"
+langfuse_public_key_secret_name = ""
+langfuse_secret_key_secret_name = ""
+langfuse_base_url               = "https://us.cloud.langfuse.com"
+polygon_api_key_secret_name     = "polygon-api-key"
+polygon_plan                    = "free"
 
 create_frontend_load_balancer = false
 frontend_domain               = "app.example.com"

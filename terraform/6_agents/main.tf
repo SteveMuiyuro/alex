@@ -139,6 +139,40 @@ resource "google_cloud_run_v2_service" "workers" {
           }
         }
       }
+      env {
+        name  = "LANGFUSE_BASE_URL"
+        value = var.langfuse_base_url
+      }
+      env {
+        name  = "POLYGON_PLAN"
+        value = var.polygon_plan
+      }
+
+      dynamic "env" {
+        for_each = var.langfuse_public_key_secret_name != "" ? [var.langfuse_public_key_secret_name] : []
+        content {
+          name = "LANGFUSE_PUBLIC_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = env.value
+              version = "latest"
+            }
+          }
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.langfuse_secret_key_secret_name != "" ? [var.langfuse_secret_key_secret_name] : []
+        content {
+          name = "LANGFUSE_SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = env.value
+              version = "latest"
+            }
+          }
+        }
+      }
 
       volume_mounts {
         name       = "cloudsql"
@@ -218,6 +252,53 @@ resource "google_cloud_run_v2_service" "planner" {
           secret_key_ref {
             secret  = var.openai_api_secret_name
             version = "latest"
+          }
+        }
+      }
+      env {
+        name  = "LANGFUSE_BASE_URL"
+        value = var.langfuse_base_url
+      }
+      env {
+        name  = "POLYGON_PLAN"
+        value = var.polygon_plan
+      }
+
+      dynamic "env" {
+        for_each = var.langfuse_public_key_secret_name != "" ? [var.langfuse_public_key_secret_name] : []
+        content {
+          name = "LANGFUSE_PUBLIC_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = env.value
+              version = "latest"
+            }
+          }
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.langfuse_secret_key_secret_name != "" ? [var.langfuse_secret_key_secret_name] : []
+        content {
+          name = "LANGFUSE_SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = env.value
+              version = "latest"
+            }
+          }
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.polygon_api_key_secret_name != "" ? [var.polygon_api_key_secret_name] : []
+        content {
+          name = "POLYGON_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = env.value
+              version = "latest"
+            }
           }
         }
       }

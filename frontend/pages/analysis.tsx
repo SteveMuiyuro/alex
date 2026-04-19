@@ -8,16 +8,28 @@ import {
   PieChart, Pie, Cell, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
+import AnalysisProgressCard from '../components/AnalysisProgressCard';
 import Layout from '../components/Layout';
 import { API_URL } from '../lib/config';
 import Head from 'next/head';
-import { ADVISOR_TEAM_ROUTE, analysisRoute } from '../lib/routes';
+import { advisorTeamRoute, analysisRoute } from '../lib/routes';
 
 interface Job {
   id: string;
   created_at: string;
   status: string;
   job_type: string;
+  progress?: {
+    percent: number;
+    stage_key: string;
+    message: string;
+    active_agents: string[];
+    payloads_completed?: {
+      report: boolean;
+      charts: boolean;
+      retirement: boolean;
+    };
+  };
   report_payload?: {
     agent: string;
     content: string;
@@ -64,6 +76,7 @@ export default function Analysis() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [fetchingLatest, setFetchingLatest] = useState(false);
+  const currentJobStatus = job?.status;
 
   useEffect(() => {
     const loadJob = async (jobId: string) => {
@@ -134,6 +147,32 @@ export default function Analysis() {
     }
   }, [job_id, router.isReady, getToken, router]);
 
+  useEffect(() => {
+    if (!job_id || !currentJobStatus || !['pending', 'running'].includes(currentJobStatus)) {
+      return;
+    }
+
+    const interval = window.setInterval(async () => {
+      try {
+        const token = await getToken();
+        const response = await fetch(`${API_URL}/api/jobs/${job_id}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (response.ok) {
+          const jobData = await response.json();
+          setJob(jobData);
+        }
+      } catch (error) {
+        console.error('Error polling job progress:', error);
+      }
+    }, 2500);
+
+    return () => window.clearInterval(interval);
+  }, [currentJobStatus, job_id, getToken]);
+
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString('en-US', {
@@ -178,7 +217,7 @@ export default function Analysis() {
               </p>
               {!fetchingLatest && (
                 <button
-                  onClick={() => router.push(ADVISOR_TEAM_ROUTE)}
+                  onClick={() => router.push(advisorTeamRoute(true))}
                   className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-blue-600 font-semibold"
                 >
                   Start New Analysis
@@ -196,14 +235,12 @@ export default function Analysis() {
       <Layout>
         <div className="min-h-screen bg-gray-50 py-8">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="bg-white rounded-lg shadow px-8 py-12 text-center">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">Analysis In Progress</h2>
-              <p className="text-gray-600 mb-6">Your analysis is still being processed. Please check back in a few moments.</p>
-              <div className="flex justify-center space-x-2 mb-6">
-                <div className="w-3 h-3 bg-ai-accent rounded-full animate-pulse"></div>
-                <div className="w-3 h-3 bg-ai-accent rounded-full animate-pulse delay-75"></div>
-                <div className="w-3 h-3 bg-ai-accent rounded-full animate-pulse delay-150"></div>
-              </div>
+            <div className="bg-white rounded-lg shadow px-8 py-12">
+              <h2 className="mb-4 text-2xl font-bold text-gray-900">Analysis In Progress</h2>
+              <p className="mb-6 text-gray-600">
+                This progress bar tracks the real backend stages we have completed so far. It is staged polling, not live streaming, so updates may arrive every few seconds.
+              </p>
+              {job.progress && <AnalysisProgressCard progress={job.progress} />}
               <button
                 onClick={() => window.location.reload()}
                 className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-blue-600 font-semibold"
@@ -231,7 +268,7 @@ export default function Analysis() {
                 </div>
               )}
               <button
-                onClick={() => router.push(ADVISOR_TEAM_ROUTE)}
+                onClick={() => router.push(advisorTeamRoute(true))}
                 className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-blue-600 font-semibold"
               >
                 Try Another Analysis
@@ -500,7 +537,7 @@ export default function Analysis() {
                 </p>
               </div>
               <button
-                onClick={() => router.push(ADVISOR_TEAM_ROUTE)}
+                onClick={() => router.push(advisorTeamRoute(true))}
                 className="px-6 py-3 bg-ai-accent text-white rounded-lg hover:bg-purple-700 font-semibold"
               >
                 New Analysis

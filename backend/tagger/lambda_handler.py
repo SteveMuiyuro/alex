@@ -100,7 +100,7 @@ async def process_instruments(
         trace_recorder.record_output(response_payload)
         return response_payload
 
-def lambda_handler(event, context):
+async def handle_tagger_event(event):
     """
     Lambda handler for instrument tagging.
 
@@ -112,8 +112,7 @@ def lambda_handler(event, context):
         ]
     }
     """
-    # Wrap entire handler with observability context
-    with observe():
+    with observe() as observability:
         try:
             # Parse the event
             instruments = event.get('instruments', [])
@@ -125,8 +124,19 @@ def lambda_handler(event, context):
                     'body': json.dumps({'error': 'No instruments provided'})
                 }
 
-            # Process all instruments in a single async context
-            result = asyncio.run(process_instruments(instruments, job_id))
+            with observability.start_as_current_span(
+                name="tagger_handler",
+                input={
+                    "job_id": job_id,
+                    "instrument_count": len(instruments),
+                },
+                metadata={"service": "tagger"},
+            ) as span:
+                if job_id:
+                    span.update_trace(session_id=str(job_id))
+
+                result = await process_instruments(instruments, job_id)
+                span.update(output=result)
 
             return {
                 'statusCode': 200,
@@ -139,3 +149,8 @@ def lambda_handler(event, context):
                 'statusCode': 500,
                 'body': json.dumps({'error': str(e)})
             }
+
+
+def lambda_handler(event, context):
+    """Synchronous compatibility wrapper for Lambda-style invocations."""
+    return asyncio.run(handle_tagger_event(event))

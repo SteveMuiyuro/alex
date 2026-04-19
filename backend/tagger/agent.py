@@ -186,8 +186,6 @@ async def classify_instrument(
                 "symbol": symbol,
                 "name": name,
                 "instrument_type": instrument_type,
-                "output": None,
-                "error": None,
             },
         ) as classification_span:
             agent = Agent(
@@ -203,7 +201,7 @@ async def classify_instrument(
             except Exception as exc:
                 error_payload = {"type": type(exc).__name__, "message": str(exc)}
                 classification_span.span_data.data["error"] = stringify_for_trace(error_payload)
-                classification_span.set_error({"message": str(exc), "data": error_payload})
+                classification_span.set_error(str(exc))
                 raise
 
             # Extract the structured output from RunResult using final_output_as
